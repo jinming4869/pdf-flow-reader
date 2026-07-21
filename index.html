@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>缓缓读 PDF</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="progress-track" aria-hidden="true">
+      <div id="progressBar" class="progress-bar"></div>
+    </div>
+
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">↓</span>
+        <div>
+          <div class="brand-name">缓缓读</div>
+          <div id="documentName" class="document-name">正在打开 PDF…</div>
+        </div>
+      </div>
+      <label class="file-button" for="filePicker">换一份 PDF</label>
+      <input id="filePicker" type="file" accept="application/pdf,.pdf" hidden />
+    </header>
+
+    <main id="viewport" class="viewport" tabindex="0" aria-label="PDF 阅读区域">
+      <div id="loading" class="loading" role="status">
+        <div class="loading-dot" aria-hidden="true"></div>
+        <span id="loadingText">正在排版，请稍等</span>
+      </div>
+      <div id="pages" class="pages" aria-live="off"></div>
+      <div id="finish" class="finish" hidden>
+        <span class="finish-mark" aria-hidden="true">✓</span>
+        <div>已经读到文末</div>
+        <button id="backToTop" type="button">从头再读</button>
+      </div>
+    </main>
+
+    <section class="controls" aria-label="自动滚动控制">
+      <button id="toggle" class="toggle" type="button" disabled>
+        <span id="toggleIcon" aria-hidden="true">Ⅱ</span>
+        <span id="toggleText">暂停</span>
+      </button>
+
+      <label class="speed-control" for="speed">
+        <span>流速</span>
+        <input id="speed" type="range" min="5" max="55" step="1" value="16" />
+        <output id="speedValue" for="speed">舒缓</output>
+      </label>
+
+      <div id="pageStatus" class="page-status" aria-live="polite">准备中</div>
+    </section>
+
+    <div id="errorPanel" class="error-panel" role="alert" hidden>
+      <strong>这份 PDF 没能打开</strong>
+      <span id="errorText"></span>
+    </div>
+
+    <script type="module" src="./app.mjs"></script>
+  </body>
+</html>

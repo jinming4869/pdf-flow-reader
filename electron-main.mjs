@@ -1,12 +1,19 @@
-import { app, BrowserWindow, Menu, shell } from "electron";
+import { app, BrowserWindow, Menu, nativeImage, shell } from "electron";
 import { existsSync } from "node:fs";
-import { extname, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { createReaderServer } from "./server.mjs";
+
+const appRoot = dirname(fileURLToPath(import.meta.url));
+const applicationName = "夜晚的书斋";
+const iconCheckIntervalMs = 5 * 60 * 1000;
 
 let mainWindow = null;
 let readerServer = null;
 let readerUrl = null;
+let activeIconMode = null;
+let iconTimer = null;
 let pendingPdfPath = findPdfArgument(process.argv.slice(1));
 
 function findPdfArgument(args) {
@@ -18,6 +25,42 @@ function findPdfArgument(args) {
     }
   }
   return null;
+}
+
+function iconModeForDate(date = new Date()) {
+  const hour = date.getHours();
+  return hour >= 6 && hour < 18 ? "day" : "night";
+}
+
+function iconPathForMode(mode) {
+  return join(appRoot, "build", mode === "day" ? "icon-day.png" : "icon-night.png");
+}
+
+function iconImageForMode(mode) {
+  return nativeImage.createFromPath(iconPathForMode(mode));
+}
+
+function applyApplicationIcon(date = new Date(), { force = false } = {}) {
+  const mode = iconModeForDate(date);
+  if (!force && activeIconMode === mode) return;
+
+  const image = iconImageForMode(mode);
+  if (image.isEmpty()) return;
+
+  activeIconMode = mode;
+  if (process.platform === "darwin" && app.dock) {
+    app.dock.setIcon(image);
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setIcon(image);
+  }
+}
+
+function startIconSchedule() {
+  applyApplicationIcon(new Date(), { force: true });
+  if (iconTimer) clearInterval(iconTimer);
+  iconTimer = setInterval(() => applyApplicationIcon(), iconCheckIntervalMs);
+  iconTimer.unref?.();
 }
 
 function startReaderServer(pdfPath = null) {
@@ -55,13 +98,15 @@ async function ensureReaderServer(pdfPath = pendingPdfPath) {
 
 async function createMainWindow() {
   const url = await ensureReaderServer();
+  const initialIcon = iconImageForMode(iconModeForDate());
 
   mainWindow = new BrowserWindow({
     width: 1180,
     height: 860,
     minWidth: 820,
     minHeight: 560,
-    title: "缓缓读 PDF",
+    title: applicationName,
+    icon: initialIcon,
     backgroundColor: "#f5efe6",
     show: false,
     webPreferences: {
@@ -72,6 +117,7 @@ async function createMainWindow() {
   });
 
   mainWindow.once("ready-to-show", () => {
+    applyApplicationIcon(new Date(), { force: true });
     mainWindow?.show();
   });
 
@@ -129,7 +175,7 @@ function installApplicationMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-app.setName("缓缓读 PDF");
+app.setName(applicationName);
 
 app.on("open-file", (event, filePath) => {
   event.preventDefault();
@@ -142,6 +188,7 @@ app.on("open-file", (event, filePath) => {
 
 app.whenReady().then(async () => {
   installApplicationMenu();
+  startIconSchedule();
   await createMainWindow();
 
   app.on("activate", async () => {
@@ -156,6 +203,10 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  if (iconTimer) {
+    clearInterval(iconTimer);
+    iconTimer = null;
+  }
   if (!readerServer) return;
   const server = readerServer;
   readerServer = null;

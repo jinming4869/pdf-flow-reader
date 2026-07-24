@@ -287,7 +287,7 @@ function startCli() {
     if (!address || typeof address === "string") return;
     const info = { port: address.port, pid: process.pid };
     if (portFile) writeFileSync(portFile, JSON.stringify(info), "utf8");
-    console.log(`缓缓读已启动：http://127.0.0.1:${address.port}/`);
+    console.log(`夜晚的书斋已启动：http://127.0.0.1:${address.port}/`);
   });
 
   const idleTimer = setInterval(() => {

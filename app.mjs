@@ -457,7 +457,7 @@ function showEmptyState() {
   elements.fileButton.textContent = "选择 PDF";
   elements.pageStatus.textContent = "请选择一份 PDF";
   elements.progressBar.style.width = "0%";
-  document.title = "缓缓读 PDF";
+  document.title = "夜晚的书斋";
 }
 
 function targetPageWidth() {
@@ -827,7 +827,7 @@ async function openPdf(sourceOrFactory, displayName) {
   );
   publishDiagnostics();
   void refreshHttpRangeDiagnostics(generation);
-  document.title = `${displayName} · 缓缓读`;
+  document.title = `${displayName} · 夜晚的书斋`;
   let firstPage;
   try {
     firstPage = await pdf.getPage(1);

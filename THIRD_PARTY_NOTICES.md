@@ -1,5 +1,19 @@
 # Third-party notices
 
+## Electron
+
+The desktop build uses Electron as its application runtime. Electron is licensed under the MIT License.
+
+Source: <https://github.com/electron/electron>
+
+## electron-builder
+
+The desktop build is packaged with electron-builder. electron-builder is licensed under the MIT License.
+
+Source: <https://github.com/electron-userland/electron-builder>
+
+## PDF.js
+
 This project includes compiled distribution files from Mozilla PDF.js 5.6.205:
 
 - `vendor/pdf.mjs`

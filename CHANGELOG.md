@@ -6,6 +6,30 @@
 
 暂无。
 
+## v2.1.0 - 2026-07-23
+
+这一版重点解决分发体验：让普通用户可以下载桌面版后双击运行，不再需要先安装 Node.js、打开终端或运行脚本。
+
+### 新增
+
+- 新增 Electron 桌面入口 `electron-main.mjs`。
+- 新增 `app:start`、`app:dir`、`app:dist` 构建脚本。
+- 新增 electron-builder 配置，可生成 macOS / Windows 的桌面 build 产物。
+- 新增桌面版 README 说明，区分普通用户下载桌面版与开发者源码运行。
+
+### 改进
+
+- 桌面版会在应用内部启动本地阅读服务，并用独立窗口打开阅读界面。
+- 普通用户使用桌面版时不再需要自行安装 Node.js。
+- 打包配置暂时关闭 asar，优先保证 PDF.js worker、OCR、WASM 和语言包路径稳定。
+- `.gitignore` 忽略 `dist/`，避免把本地构建产物提交进源码仓库。
+
+### 工程化
+
+- 新增 Electron 与 electron-builder 开发依赖。
+- 新增 `package-lock.json` 锁定桌面构建依赖。
+- 发布前验证：`npm test` 24 项通过，Electron macOS build 可生成。
+
 ## v2.0.0 - 2026-07-23
 
 相较于 GitHub 公开版 `v1.0.0`，这一版将「缓缓读 PDF」从一个 Windows 优先的简易自动滚动阅读器，扩展为一个跨平台、本地优先、适合大 PDF 连续阅读的小工具。

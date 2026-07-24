@@ -1,15 +1,61 @@
 {
   "name": "pdf-flow-reader",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": false,
   "description": "A calm, local-only PDF auto-scroll reader.",
   "type": "module",
+  "main": "electron-main.mjs",
   "scripts": {
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "app:start": "electron .",
+    "app:dir": "electron-builder --dir",
+    "app:dist": "electron-builder"
   },
   "license": "MIT",
   "author": "jinming4869",
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.jinming4869.pdf-flow-reader",
+    "productName": "缓缓读 PDF",
+    "asar": false,
+    "files": [
+      "electron-main.mjs",
+      "server.mjs",
+      "app.mjs",
+      "index.html",
+      "styles.css",
+      "http-range.mjs",
+      "ocr-provider.mjs",
+      "page-layout.mjs",
+      "pdf-source.mjs",
+      "reading-model.mjs",
+      "render-scheduler.mjs",
+      "vendor/**/*",
+      "package.json",
+      "LICENSE",
+      "THIRD_PARTY_NOTICES.md"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dir",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "dir",
+        "portable"
+      ]
+    }
   }
 }

@@ -1,0 +1,164 @@
+import { app, BrowserWindow, Menu, shell } from "electron";
+import { existsSync } from "node:fs";
+import { extname, resolve } from "node:path";
+
+import { createReaderServer } from "./server.mjs";
+
+let mainWindow = null;
+let readerServer = null;
+let readerUrl = null;
+let pendingPdfPath = findPdfArgument(process.argv.slice(1));
+
+function findPdfArgument(args) {
+  for (const arg of args) {
+    if (!arg || arg.startsWith("--")) continue;
+    const candidate = resolve(arg);
+    if (extname(candidate).toLowerCase() === ".pdf" && existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function startReaderServer(pdfPath = null) {
+  return new Promise((resolveStart, rejectStart) => {
+    const server = createReaderServer({ pdfPath });
+    const onError = (error) => {
+      server.off("listening", onListening);
+      rejectStart(error);
+    };
+    const onListening = () => {
+      server.off("error", onError);
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        server.close();
+        rejectStart(new Error("本地阅读服务没有取得端口。"));
+        return;
+      }
+      resolveStart({ server, url: `http://127.0.0.1:${address.port}/` });
+    };
+
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(0, "127.0.0.1");
+  });
+}
+
+async function ensureReaderServer(pdfPath = pendingPdfPath) {
+  if (readerServer && readerUrl) return readerUrl;
+
+  const started = await startReaderServer(pdfPath);
+  readerServer = started.server;
+  readerUrl = started.url;
+  return readerUrl;
+}
+
+async function createMainWindow() {
+  const url = await ensureReaderServer();
+
+  mainWindow = new BrowserWindow({
+    width: 1180,
+    height: 860,
+    minWidth: 820,
+    minHeight: 560,
+    title: "缓缓读 PDF",
+    backgroundColor: "#f5efe6",
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+
+  mainWindow.once("ready-to-show", () => {
+    mainWindow?.show();
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
+    if (/^https?:\/\//i.test(targetUrl)) {
+      shell.openExternal(targetUrl);
+    }
+    return { action: "deny" };
+  });
+
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
+
+  await mainWindow.loadURL(url);
+}
+
+function installApplicationMenu() {
+  const template = [
+    {
+      label: app.name,
+      submenu: [
+        { role: "about" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" },
+      ],
+    },
+    {
+      label: "编辑",
+      submenu: [
+        { role: "undo", label: "撤销" },
+        { role: "redo", label: "重做" },
+        { type: "separator" },
+        { role: "cut", label: "剪切" },
+        { role: "copy", label: "复制" },
+        { role: "paste", label: "粘贴" },
+        { role: "selectAll", label: "全选" },
+      ],
+    },
+    {
+      label: "窗口",
+      submenu: [
+        { role: "minimize", label: "最小化" },
+        { role: "zoom", label: "缩放" },
+        { type: "separator" },
+        { role: "front", label: "全部置于顶层" },
+      ],
+    },
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+app.setName("缓缓读 PDF");
+
+app.on("open-file", (event, filePath) => {
+  event.preventDefault();
+  if (extname(filePath).toLowerCase() !== ".pdf") return;
+  pendingPdfPath = filePath;
+  if (mainWindow && readerUrl) {
+    mainWindow.loadURL(readerUrl).catch(() => {});
+  }
+});
+
+app.whenReady().then(async () => {
+  installApplicationMenu();
+  await createMainWindow();
+
+  app.on("activate", async () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      await createMainWindow();
+    }
+  });
+});
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
+});
+
+app.on("before-quit", () => {
+  if (!readerServer) return;
+  const server = readerServer;
+  readerServer = null;
+  readerUrl = null;
+  server.close();
+});

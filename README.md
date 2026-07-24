@@ -4,11 +4,29 @@
 
 一个本地、轻量的 PDF 连续阅读器。打开后，页面会以可调的速度自动向下移动，让论文、报告和长文档读起来少一点手动操作。PDF 只在本机处理，不会上传。
 
-## 快速开始
+## 快速开始：桌面版
 
-1. 安装 [Node.js 18 或更高版本](https://nodejs.org/)。
-2. 下载并解压本项目。
-3. 启动后在页面中选择 PDF，或者直接把 PDF 拖进阅读区域。
+普通用户建议直接下载 GitHub Releases 里的桌面版压缩包，而不是下载源码。
+
+### macOS
+
+1. 下载 macOS 版本压缩包并解压。
+2. 双击 `缓缓读 PDF.app`。
+3. 在页面中选择 PDF，或者直接把 PDF 拖进阅读区域。
+
+如果 macOS 提示“无法验证开发者”，可以右键点击 `缓缓读 PDF.app`，选择“打开”。这是未签名个人应用的常见提示。
+
+### Windows
+
+1. 下载 Windows 版本压缩包并解压。
+2. 双击 `缓缓读 PDF.exe`。
+3. 在页面中选择 PDF，或者直接把 PDF 拖进阅读区域。
+
+如果 Windows SmartScreen 出现安全提示，可以选择“更多信息”后继续运行。正式签名版本会在后续考虑。
+
+## 源码运行
+
+如果你想从源码运行，需要安装 [Node.js 18 或更高版本](https://nodejs.org/)。
 
 ### macOS
 
@@ -42,13 +60,9 @@
 - 阅读器长时无请求时，本地服务会自动退出
 - 不联网，不上传文件
 
-## 本地运行
+## 本地与隐私
 
-```powershell
-./start-reader.ps1 "C:\path\to\document.pdf"
-```
-
-阅读器只监听 `127.0.0.1`，浏览器通过临时本地端口访问。项目没有 npm 依赖，PDF.js 和 OCR 的运行文件都已放在 `vendor/` 目录里，不需要运行 `npm install` 。
+阅读器只监听 `127.0.0.1`，PDF 文件不会上传。桌面版会在应用内部启动本地阅读服务；源码版会在系统浏览器中打开临时本地端口。
 
 OCR 引擎和四个语言包约占 19 MB。它们只在点击页面边缘的“扫描页增强估算”后加载，不会影响普通文字型 PDF 的启动。普通文字 PDF 通常不需要开启；扫描识别只用于改进阅读速度估算，全程在本机完成，不会改变或上传 PDF。
 
@@ -56,10 +70,36 @@ OCR 引擎和四个语言包约占 19 MB。它们只在点击页面边缘的“�
 
 开发时可以在浏览器控制台运行 `window.__pdfFlowDiagnostics.snapshot()`，查看首屏时序、渲染/取消数量、画布像素预算、热区、数据来源和 OCR 状态。诊断数据只保留在当前本机页面中。
 
+## 开发与构建
+
+安装依赖：
+
+```sh
+npm install
+```
+
 运行永久回归测试：
 
 ```sh
 npm test
+```
+
+启动 Electron 桌面版开发预览：
+
+```sh
+npm run app:start
+```
+
+生成可双击运行的桌面 build 文件夹：
+
+```sh
+npm run app:dir
+```
+
+生成发布用压缩包或安装包：
+
+```sh
+npm run app:dist
 ```
 
 ## 更新日志
@@ -68,7 +108,7 @@ npm test
 
 ## 技术说明
 
-界面使用原生 HTML、CSS 和 JavaScript，PDF 渲染由 [Mozilla PDF.js](https://github.com/mozilla/pdf.js) 完成，可选文字识别由 [Tesseract.js](https://github.com/naptha/tesseract.js) 完成。本项目代码采用 MIT License；第三方许可详见 `THIRD_PARTY_NOTICES.md`。
+界面使用原生 HTML、CSS 和 JavaScript，PDF 渲染由 [Mozilla PDF.js](https://github.com/mozilla/pdf.js) 完成，可选文字识别由 [Tesseract.js](https://github.com/naptha/tesseract.js) 完成。桌面分发由 [Electron](https://www.electronjs.org/) 与 [electron-builder](https://www.electron.build/) 完成。本项目代码采用 MIT License；第三方许可详见 `THIRD_PARTY_NOTICES.md`。
 
 ## 许可
 

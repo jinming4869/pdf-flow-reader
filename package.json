@@ -2,8 +2,11 @@
   "name": "pdf-flow-reader",
   "version": "1.0.0",
   "private": false,
-  "description": "A calm, local-only PDF auto-scroll reader for Windows.",
+  "description": "A calm, local-only PDF auto-scroll reader.",
   "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
   "license": "MIT",
   "author": "jinming4869",
   "engines": {

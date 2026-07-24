@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
+    <meta name="description" content="让 PDF 阅读和轻吻纸质书一样好玩。" />
     <title>缓缓读 PDF</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
@@ -20,11 +21,26 @@
           <div id="documentName" class="document-name">正在打开 PDF…</div>
         </div>
       </div>
-      <label class="file-button" for="filePicker">换一份 PDF</label>
+      <label id="fileButton" class="file-button" for="filePicker">选择 PDF</label>
       <input id="filePicker" type="file" accept="application/pdf,.pdf" hidden />
     </header>
 
     <main id="viewport" class="viewport" tabindex="0" aria-label="PDF 阅读区域">
+      <div id="emptyState" class="empty-state">
+        <div class="empty-mark" aria-hidden="true">↓</div>
+        <p class="empty-kicker">缓缓读</p>
+        <div class="tagline-cloud" aria-label="多语言 slogan">
+          <span class="tagline-float tagline-float-a" aria-hidden="true">Make reading PDFs as delightful as gently kissing a paper book.</span>
+          <span class="tagline-float tagline-float-b" aria-hidden="true">PDF読書を、紙の本にそっとキスするように。</span>
+          <span class="tagline-float tagline-float-c" aria-hidden="true">Haz que leer un PDF sea tan agradable como besar suavemente un libro de papel.</span>
+          <span class="tagline-float tagline-float-d" aria-hidden="true">PDFs lesen – so schön wie ein sanfter Kuss auf ein Papierbuch.</span>
+          <span class="tagline-float tagline-float-e" aria-hidden="true">Lire un PDF, aussi agréable que d'embrasser doucement un livre en papier.</span>
+          <h1 class="tagline-main">让 PDF 阅读和轻吻纸质书一样好玩</h1>
+        </div>
+        <label class="primary-button" for="filePicker">选择一份 PDF</label>
+        <p class="drop-hint">拖入 PDF，或点击按钮打开</p>
+        <p class="empty-footnote">选一份论文、报告或长文档，让它自己慢慢向下读。文件只在本机打开。</p>
+      </div>
       <div id="loading" class="loading" role="status">
         <div class="loading-dot" aria-hidden="true"></div>
         <span id="loadingText">正在排版，请稍等</span>
@@ -37,20 +53,52 @@
       </div>
     </main>
 
-    <section class="controls" aria-label="自动滚动控制">
+    <section id="controls" class="controls" aria-label="自动滚动控制" hidden>
       <button id="toggle" class="toggle" type="button" disabled>
         <span id="toggleIcon" aria-hidden="true">Ⅱ</span>
         <span id="toggleText">暂停</span>
       </button>
 
-      <label class="speed-control" for="speed">
-        <span>流速</span>
-        <input id="speed" type="range" min="5" max="55" step="1" value="16" />
-        <output id="speedValue" for="speed">舒缓</output>
-      </label>
+      <div id="speedExperience" class="speed-experience" data-motion="idle">
+        <div class="speed-heading">
+          <output id="speedValue" class="speed-name" for="speed">长日留痕</output>
+          <span class="physical-speed">
+            <strong id="speedPixels">16</strong>
+            <span>px/s</span>
+          </span>
+        </div>
+
+        <div id="speedEstimate" class="speed-estimate" aria-live="polite" aria-atomic="true">
+          <span id="estimateWaiting" class="estimate-waiting">正在轻轻估算…</span>
+          <span id="cjkEstimate" class="estimate-item" hidden>
+            <strong id="cjkRate">—</strong><span>字/分</span>
+          </span>
+          <span id="estimateDivider" class="estimate-divider" aria-hidden="true" hidden>·</span>
+          <span id="englishEstimate" class="estimate-item" hidden>
+            <strong id="englishRate">—</strong><span>词/分</span>
+          </span>
+        </div>
+
+        <label class="speed-control" for="speed">
+          <span class="visually-hidden">滚动流速</span>
+          <input id="speed" type="range" min="4" max="64" step="1" value="16" />
+        </label>
+
+        <div id="speedParticles" class="speed-particles" aria-hidden="true"></div>
+      </div>
 
       <div id="pageStatus" class="page-status" aria-live="polite">准备中</div>
     </section>
+
+    <aside id="ocrDock" class="ocr-dock" aria-label="扫描页阅读速度估算" hidden>
+      <button id="ocrButton" type="button" aria-describedby="ocrHelp" disabled>
+        扫描页增强估算
+      </button>
+      <span id="ocrHelp" class="ocr-help" role="note">
+        扫描件或图片页才需要。它会在本机识别附近 5 页，让“字/分、词/分”估算更准；普通文字 PDF 通常不用开启，也不会改变或上传 PDF。
+      </span>
+      <span id="ocrStatus" class="ocr-status" role="status" hidden></span>
+    </aside>
 
     <div id="errorPanel" class="error-panel" role="alert" hidden>
       <strong>这份 PDF 没能打开</strong>

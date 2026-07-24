@@ -7,25 +7,13 @@ $ErrorActionPreference = "Stop"
 $readerDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $serverPath = Join-Path $readerDir "server.mjs"
 
-if ([string]::IsNullOrWhiteSpace($PdfPath)) {
-  Add-Type -AssemblyName System.Windows.Forms
-  $dialog = New-Object System.Windows.Forms.OpenFileDialog
-  $dialog.Title = "Choose a PDF"
-  $dialog.Filter = "PDF files (*.pdf)|*.pdf"
-  $dialog.CheckFileExists = $true
-  $dialog.Multiselect = $false
+$resolvedPdf = $null
+if (-not [string]::IsNullOrWhiteSpace($PdfPath)) {
+  $resolvedPdf = (Resolve-Path -LiteralPath $PdfPath).Path
 
-  if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
-    exit 0
+  if ([IO.Path]::GetExtension($resolvedPdf) -ine ".pdf") {
+    throw "Please choose a PDF file."
   }
-
-  $PdfPath = $dialog.FileName
-}
-
-$resolvedPdf = (Resolve-Path -LiteralPath $PdfPath).Path
-
-if ([IO.Path]::GetExtension($resolvedPdf) -ne ".pdf") {
-  throw "Please choose a PDF file."
 }
 
 $nodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue
@@ -35,8 +23,17 @@ if ($nodeCommand) {
   throw "Node.js was not found. Install Node.js 18 or newer and try again."
 }
 
+$nodeVersion = (& $nodePath --version).Trim().TrimStart("v")
+if ([version]$nodeVersion -lt [version]"18.0.0") {
+  throw "Node.js $nodeVersion was found, but version 18 or newer is required."
+}
+
 $portFile = Join-Path $env:TEMP ("pdf-flow-reader-{0}.json" -f [guid]::NewGuid().ToString("N"))
-$argumentLine = '"{0}" "{1}" "{2}"' -f $serverPath, $resolvedPdf, $portFile
+if ($resolvedPdf) {
+  $argumentLine = '"{0}" "{1}" "{2}"' -f $serverPath, $resolvedPdf, $portFile
+} else {
+  $argumentLine = '"{0}" --port-file "{1}"' -f $serverPath, $portFile
+}
 $serverProcess = Start-Process -FilePath $nodePath -ArgumentList $argumentLine -WindowStyle Hidden -PassThru
 
 try {

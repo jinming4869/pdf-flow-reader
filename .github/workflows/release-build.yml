@@ -35,7 +35,7 @@ jobs:
         run: npm test
 
       - name: Build desktop package
-        run: npm run app:dist
+        run: npm run app:dist -- --publish never
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

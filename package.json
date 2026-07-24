@@ -1,6 +1,6 @@
 {
   "name": "pdf-flow-reader",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "private": false,
   "description": "A calm, local-only PDF auto-scroll reader.",
   "type": "module",
@@ -49,6 +49,7 @@
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "build/icon.icns",
+      "artifactName": "night-study-${version}-mac-${arch}.${ext}",
       "target": [
         "dir",
         "zip"
@@ -60,6 +61,9 @@
         "dir",
         "portable"
       ]
+    },
+    "portable": {
+      "artifactName": "night-study-${version}-windows-portable.${ext}"
     }
   }
 }

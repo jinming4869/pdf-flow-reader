@@ -21,6 +21,17 @@ function createStaticFiles(appRoot) {
     ["/render-scheduler.mjs", [join(appRoot, "render-scheduler.mjs"), "text/javascript; charset=utf-8"]],
     ["/ocr-provider.mjs", [join(appRoot, "ocr-provider.mjs"), "text/javascript; charset=utf-8"]],
     ["/reading-model.mjs", [join(appRoot, "reading-model.mjs"), "text/javascript; charset=utf-8"]],
+    ["/reading-rhythm.mjs", [join(appRoot, "reading-rhythm.mjs"), "text/javascript; charset=utf-8"]],
+    ["/reading-clock.mjs", [join(appRoot, "reading-clock.mjs"), "text/javascript; charset=utf-8"]],
+    ["/sound-engine.mjs", [join(appRoot, "sound-engine.mjs"), "text/javascript; charset=utf-8"]],
+    ["/storage.mjs", [join(appRoot, "storage.mjs"), "text/javascript; charset=utf-8"]],
+    ["/text-segment.mjs", [join(appRoot, "text-segment.mjs"), "text/javascript; charset=utf-8"]],
+    ["/build/rhythm-motifs/snow-mist.svg", [join(appRoot, "build", "rhythm-motifs", "snow-mist.svg"), "image/svg+xml"]],
+    ["/build/rhythm-motifs/aesthetic-walk.svg", [join(appRoot, "build", "rhythm-motifs", "aesthetic-walk.svg"), "image/svg+xml"]],
+    ["/build/rhythm-motifs/long-day.svg", [join(appRoot, "build", "rhythm-motifs", "long-day.svg"), "image/svg+xml"]],
+    ["/build/rhythm-motifs/winding-stream.svg", [join(appRoot, "build", "rhythm-motifs", "winding-stream.svg"), "image/svg+xml"]],
+    ["/build/rhythm-motifs/strong-wind.svg", [join(appRoot, "build", "rhythm-motifs", "strong-wind.svg"), "image/svg+xml"]],
+    ["/build/rhythm-motifs/all-things-flourish.svg", [join(appRoot, "build", "rhythm-motifs", "all-things-flourish.svg"), "image/svg+xml"]],
     ["/vendor/pdf.mjs", [join(appRoot, "vendor", "pdf.mjs"), "text/javascript; charset=utf-8"]],
     ["/vendor/pdf.worker.mjs", [join(appRoot, "vendor", "pdf.worker.mjs"), "text/javascript; charset=utf-8"]],
     ["/vendor/tesseract/tesseract.esm.min.js", [join(appRoot, "vendor", "tesseract", "tesseract.esm.min.js"), "text/javascript; charset=utf-8"]],
@@ -164,6 +175,15 @@ function sendPdf(request, response, pdfPath, diagnostics) {
   );
 }
 
+function audioContentType(filePath) {
+  const extension = extname(filePath).toLowerCase();
+  if (extension === ".mp3") return "audio/mpeg";
+  if (extension === ".wav") return "audio/wav";
+  if (extension === ".ogg") return "audio/ogg";
+  if (extension === ".m4a") return "audio/mp4";
+  return null;
+}
+
 function sendJson(request, response, value) {
   const body = Buffer.from(JSON.stringify(value));
   response.writeHead(200, {
@@ -223,9 +243,18 @@ export function createReaderServer({
           // The file may have been moved after the local reader started.
         }
       }
+      let lastModified = null;
+      if (resolvedPdfPath && fileSize !== null) {
+        try {
+          lastModified = Math.round(statSync(resolvedPdfPath).mtimeMs);
+        } catch {
+          // Best-effort metadata for local reading memory.
+        }
+      }
       sendJson(request, response, {
         fileName: fileSize === null ? null : basename(resolvedPdfPath),
         fileSize,
+        lastModified,
         systemMemoryGiB: Math.round((systemMemoryBytes / 2 ** 30) * 10) / 10,
       });
       return;
@@ -240,6 +269,16 @@ export function createReaderServer({
       response.writeHead(204, { "Cache-Control": "no-store" });
       response.end();
       return;
+    }
+
+    if (url.pathname.startsWith("/build/sound-cues/")) {
+      const filePath = resolve(appRoot, `.${decodeURIComponent(url.pathname)}`);
+      const soundRoot = resolve(appRoot, "build", "sound-cues");
+      const contentType = audioContentType(filePath);
+      if (filePath.startsWith(soundRoot) && contentType) {
+        sendStatic(request, response, filePath, contentType, true);
+        return;
+      }
     }
 
     const staticEntry = staticFiles.get(url.pathname);

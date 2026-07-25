@@ -21,7 +21,10 @@
           <div id="documentName" class="document-name">正在打开 PDF…</div>
         </div>
       </div>
-      <label id="fileButton" class="file-button" for="filePicker">选择 PDF</label>
+      <div class="topbar-actions">
+        <div id="topReadingTime" class="top-reading-time" aria-live="polite" hidden></div>
+        <label id="fileButton" class="file-button" for="filePicker">选择 PDF</label>
+      </div>
       <input id="filePicker" type="file" accept="application/pdf,.pdf" hidden />
     </header>
 
@@ -39,7 +42,17 @@
         </div>
         <label class="primary-button" for="filePicker">选择一份 PDF</label>
         <p class="drop-hint">拖入 PDF，或点击按钮打开</p>
-        <p class="empty-footnote">选一份论文、报告或长文档，让它自己慢慢向下读。文件只在本机打开。</p>
+
+        <section id="homeEcho" class="home-echo" aria-label="阅读回声" hidden>
+          <div class="home-section-heading">
+            <p class="home-eyebrow">Reading Echo</p>
+            <h2>最近在读什么书？</h2>
+          </div>
+          <div id="recentBooks" class="recent-books"></div>
+          <p id="resumeHint" class="resume-hint" hidden></p>
+          <div id="rhythmEcho" class="rhythm-echo" hidden></div>
+          <button id="clearRecords" class="ghost-button" type="button">清除本机阅读回声</button>
+        </section>
       </div>
       <div id="loading" class="loading" role="status">
         <div class="loading-dot" aria-hidden="true"></div>
@@ -77,6 +90,10 @@
           <span id="englishEstimate" class="estimate-item" hidden>
             <strong id="englishRate">—</strong><span>词/分</span>
           </span>
+        </div>
+
+        <div id="rhythmInsight" class="rhythm-insight" hidden>
+          <span id="densityHint">这一带的文字密度还在形成回声。</span>
         </div>
 
         <label class="speed-control" for="speed">

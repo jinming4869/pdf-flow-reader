@@ -78,11 +78,12 @@ test("server streams Unicode-path PDFs with HEAD, 206, and 416 semantics", async
   const config = await fetch(`${origin}/config.json`, {
     headers: { Connection: "close" },
   });
-  assert.deepEqual(await config.json(), {
-    fileName: pdfName,
-    fileSize: bytes.length,
-    systemMemoryGiB: 16,
-  });
+  const configJson = await config.json();
+  assert.equal(configJson.fileName, pdfName);
+  assert.equal(configJson.fileSize, bytes.length);
+  assert.equal(configJson.systemMemoryGiB, 16);
+  assert.equal(typeof configJson.lastModified, "number");
+  assert.ok(configJson.lastModified > 0);
 
   rmSync(pdfPath);
   const missingPdf = await fetch(`${origin}/document.pdf`, {
@@ -97,6 +98,7 @@ test("server streams Unicode-path PDFs with HEAD, 206, and 416 semantics", async
   assert.deepEqual(await missingConfig.json(), {
     fileName: null,
     fileSize: null,
+    lastModified: null,
     systemMemoryGiB: 16,
   });
 
@@ -127,6 +129,22 @@ test("registered static assets use Content-Length and support HEAD", async (t) =
   assert.match(head.headers.get("content-type"), /text\/javascript/);
   assert.ok(Number(head.headers.get("content-length")) > 100_000);
   assert.equal(await head.text(), "");
+
+  const motif = await fetch(`${origin}/build/rhythm-motifs/snow-mist.svg`, {
+    method: "HEAD",
+    headers: { Connection: "close" },
+  });
+  assert.equal(motif.status, 200);
+  assert.equal(motif.headers.get("content-type"), "image/svg+xml");
+  assert.ok(Number(motif.headers.get("content-length")) > 100);
+
+  const soundCue = await fetch(`${origin}/build/sound-cues/up-1.m4a`, {
+    method: "HEAD",
+    headers: { Connection: "close" },
+  });
+  assert.equal(soundCue.status, 200);
+  assert.equal(soundCue.headers.get("content-type"), "audio/mp4");
+  assert.ok(Number(soundCue.headers.get("content-length")) > 1000);
 
   const streamed = await fetch(`${origin}/http-range.mjs`, {
     headers: { Connection: "close" },

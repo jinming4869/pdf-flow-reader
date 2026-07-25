@@ -10,11 +10,24 @@ import {
   updatePageLayout,
 } from "./page-layout.mjs";
 import {
+  SPEED_TIERS,
   analyzeText,
   readingMetricMode,
   speedTier,
   unitsPerMinute,
 } from "./reading-model.mjs";
+import { createRhythmSnapshot } from "./reading-rhythm.mjs";
+import { createSpeedCueEngine } from "./sound-engine.mjs";
+import {
+  clearLocalState,
+  createDocumentFingerprint,
+  latestRhythmEcho,
+  readLocalState,
+  recentDocumentRecords,
+  upsertDocumentRecord,
+  upsertRhythmRecord,
+  writeLocalState,
+} from "./storage.mjs";
 import {
   cacheBudgetForDeviceMemory,
   RenderScheduler,
@@ -31,6 +44,11 @@ const elements = {
   loading: document.querySelector("#loading"),
   loadingText: document.querySelector("#loadingText"),
   emptyState: document.querySelector("#emptyState"),
+  homeEcho: document.querySelector("#homeEcho"),
+  recentBooks: document.querySelector("#recentBooks"),
+  resumeHint: document.querySelector("#resumeHint"),
+  rhythmEcho: document.querySelector("#rhythmEcho"),
+  clearRecords: document.querySelector("#clearRecords"),
   documentName: document.querySelector("#documentName"),
   fileButton: document.querySelector("#fileButton"),
   filePicker: document.querySelector("#filePicker"),
@@ -49,6 +67,9 @@ const elements = {
   estimateDivider: document.querySelector("#estimateDivider"),
   englishEstimate: document.querySelector("#englishEstimate"),
   englishRate: document.querySelector("#englishRate"),
+  rhythmInsight: document.querySelector("#rhythmInsight"),
+  densityHint: document.querySelector("#densityHint"),
+  topReadingTime: document.querySelector("#topReadingTime"),
   speedParticles: document.querySelector("#speedParticles"),
   pageStatus: document.querySelector("#pageStatus"),
   progressBar: document.querySelector("#progressBar"),
@@ -62,9 +83,11 @@ const elements = {
 };
 
 const TEXT_WINDOW_RADIUS = 2;
+const RESTORE_TOAST_MS = 4_200;
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const numberFormat = new Intl.NumberFormat("zh-CN");
 
+let localState = readLocalState();
 let activePdf = null;
 let activeLoadingTask = null;
 let activeFileTransport = null;
@@ -86,7 +109,8 @@ let lastObservedScrollTop = 0;
 let readyToMove = false;
 let playing = true;
 let wasPlayingBeforeHidden = false;
-let speed = Number(elements.speed.value);
+let speed = localState.preferences.defaultSpeedPxPerSecond;
+elements.speed.value = String(speed);
 let easedSpeed = 0;
 let scrollCarry = 0;
 let lastFrame = 0;
@@ -116,6 +140,16 @@ let diagnosticsSession = {
   placeholderVisibleMs: null,
   firstHighQualityMs: null,
 };
+let activeDocumentRecord = null;
+let activeFileMeta = null;
+let pendingResumeRecord = null;
+let persistTimer = 0;
+let restoreMessageTimer = 0;
+const speedCueEngine = createSpeedCueEngine({
+  getVolume: () => localState.preferences.soundCueVolume,
+  getPatternMode: () => localState.preferences.rhythmPatternMode,
+  getSampleUrl: (step) => `./build/sound-cues/${step.direction}-${step.boundaryIndex + 1}.m4a`,
+});
 
 function emptyRenderSnapshot() {
   const budget = cacheBudgetForDeviceMemory(deviceMemoryGb, { ocrEnabled });
@@ -179,6 +213,243 @@ function publishDiagnostics() {
     document.body.append(output);
   }
   output.textContent = JSON.stringify(collectDiagnosticsSnapshot());
+}
+
+function saveLocalState(nextState = localState) {
+  localState = writeLocalState(nextState);
+  renderHomeEcho();
+}
+
+function displayTitle(fileName) {
+  return String(fileName || "未命名 PDF").replace(/\.pdf$/i, "");
+}
+
+function formatDateLabel(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "刚刚";
+  const now = new Date();
+  const sameDay = date.toDateString() === now.toDateString();
+  return sameDay
+    ? `今天 ${date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`
+    : date.toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
+}
+
+function formatProgress(record) {
+  const percent = Math.round((record.progressRatio ?? 0) * 100);
+  if (record.lastPageIndex > 0 && percent > 0) return `第 ${record.lastPageIndex} 页 · ${percent}%`;
+  if (record.lastPageIndex > 0) return `第 ${record.lastPageIndex} 页`;
+  return "还在书页开头";
+}
+
+function formatEstimateRange(min, max, unit) {
+  const low = Math.round(Number(min) || 0);
+  const high = Math.round(Number(max) || 0);
+  if (!low && !high) return "";
+  if (!high || high === low) return `约 ${numberFormat.format(low)} ${unit}`;
+  return `约 ${numberFormat.format(low)}–${numberFormat.format(high)} ${unit}`;
+}
+
+function renderHomeEcho() {
+  const recent = recentDocumentRecords(localState);
+  elements.homeEcho.hidden = false;
+  elements.clearRecords.hidden = recent.length === 0;
+  elements.recentBooks.replaceChildren();
+
+  if (!recent.length) {
+    const emptyCard = document.createElement("div");
+    emptyCard.className = "recent-book-card is-empty";
+    emptyCard.innerHTML = `
+      <span class="recent-book-title">读过的书，会在这里留下回声。</span>
+      <span class="recent-book-progress">上次停下的位置、节奏和速度会只保存在本机。</span>
+      <span class="recent-book-rhythm">选择一份 PDF 开始。</span>
+    `;
+    elements.recentBooks.append(emptyCard);
+  }
+
+  for (const record of recent) {
+    const button = document.createElement("button");
+    button.className = "recent-book-card";
+    button.type = "button";
+    button.dataset.documentId = record.id;
+    button.innerHTML = `
+      <span class="recent-book-title"></span>
+      <span class="recent-book-progress"></span>
+      <span class="recent-book-rhythm"></span>
+      <span class="recent-book-action">从这里继续</span>
+    `;
+    button.querySelector(".recent-book-title").textContent = displayTitle(record.fileName);
+    button.querySelector(".recent-book-progress").textContent = formatProgress(record);
+    button.querySelector(".recent-book-rhythm").textContent = `${speedTier(record.lastSpeedPxPerSecond).name} · ${record.lastSpeedPxPerSecond} px/s`;
+    elements.recentBooks.append(button);
+  }
+
+  elements.resumeHint.hidden = !pendingResumeRecord;
+  if (pendingResumeRecord) {
+    elements.resumeHint.textContent = `请选择《${displayTitle(pendingResumeRecord.fileName)}》原文件，书斋会回到上次停下的位置。`;
+  }
+
+  const echo = latestRhythmEcho(localState);
+  elements.rhythmEcho.hidden = !echo;
+  if (echo) {
+    const cjk = formatEstimateRange(
+      echo.estimatedCharsPerMinuteMin,
+      echo.estimatedCharsPerMinuteMax,
+      "字/分",
+    );
+    const english = formatEstimateRange(
+      echo.estimatedWordsPerMinuteMin,
+      echo.estimatedWordsPerMinuteMax,
+      "词/分",
+    );
+    const estimateText = [cjk, english].filter(Boolean).join("，");
+    elements.rhythmEcho.innerHTML = `
+      <p class="rhythm-echo-title">阅读回声</p>
+      <p class="rhythm-echo-line"></p>
+      <p class="rhythm-echo-meta"></p>
+    `;
+    elements.rhythmEcho.querySelector(".rhythm-echo-line").textContent =
+      `在阅读《${displayTitle(echo.fileName)}》时，你凝神静听。`;
+    elements.rhythmEcho.querySelector(".rhythm-echo-meta").textContent =
+      `${echo.maxBandName} · ${echo.maxSpeedPxPerSecond} px/s${estimateText ? ` · ${estimateText}` : ""}`;
+  }
+}
+
+function applyPatternMode(mode = localState.preferences.rhythmPatternMode) {
+  const nextMode = mode === "clear" ? "clear" : "soft";
+  document.documentElement.dataset.patternMode = nextMode;
+}
+
+function speedTierIndex(value) {
+  const themeKey = speedTier(value).themeKey;
+  return Math.max(0, SPEED_TIERS.findIndex((tier) => tier.themeKey === themeKey));
+}
+
+function queueSpeedCue(previousSpeed, nextSpeed) {
+  const fromIndex = speedTierIndex(previousSpeed);
+  const toIndex = speedTierIndex(nextSpeed);
+  if (fromIndex === toIndex) return;
+  void speedCueEngine.resume();
+  speedCueEngine.queueTierChange(fromIndex, toIndex);
+}
+
+function togglePatternMode() {
+  const nextMode = localState.preferences.rhythmPatternMode === "clear" ? "soft" : "clear";
+  saveLocalState({
+    ...localState,
+    preferences: {
+      ...localState.preferences,
+      rhythmPatternMode: nextMode,
+    },
+  });
+  applyPatternMode(nextMode);
+}
+
+function isBackgroundClick(event) {
+  if (!(event.target instanceof Element)) return false;
+  if (!elements.viewport.contains(event.target)) return false;
+  return !event.target.closest(
+    ".page-shell, canvas, button, label, input, .home-echo, .tagline-cloud, .primary-button, .controls, .ocr-dock, .error-panel",
+  );
+}
+
+function showRestoreMessage(record) {
+  window.clearTimeout(restoreMessageTimer);
+  elements.loading.hidden = false;
+  elements.loadingText.textContent = `回到《${displayTitle(record.fileName)}》上次停下的位置`;
+  restoreMessageTimer = window.setTimeout(() => {
+    if (diagnosticsSession.firstHighQualityMs !== null) elements.loading.hidden = true;
+  }, RESTORE_TOAST_MS);
+}
+
+function createFileMetaFromFile(file) {
+  return {
+    fileName: file.name,
+    fileSize: file.size,
+    lastModified: file.lastModified ?? 0,
+  };
+}
+
+function activateDocumentRecord(fileMeta) {
+  const fingerprint = createDocumentFingerprint(fileMeta);
+  const id = fileMeta.id ?? undefined;
+  const existing = recentDocumentRecords(localState, 18).find(
+    (record) => record.fingerprint === fingerprint || (id && record.id === id),
+  );
+  const nextState = upsertDocumentRecord(
+    localState,
+    { ...fileMeta, fingerprint },
+    {
+      lastSpeedPxPerSecond: existing?.lastSpeedPxPerSecond ?? speed,
+      lastBandKey: existing?.lastBandKey ?? speedTier(speed).themeKey,
+    },
+  );
+  saveLocalState(nextState);
+  activeDocumentRecord = recentDocumentRecords(localState, 18).find(
+    (record) => record.fingerprint === fingerprint,
+  ) ?? null;
+  return activeDocumentRecord;
+}
+
+function maybeRestoreReadingPosition() {
+  const record = activeDocumentRecord;
+  if (
+    !record ||
+    !localState.preferences.restoreLastPositionEnabled ||
+    !pageShells.length ||
+    record.lastScrollTop <= 0
+  ) {
+    return false;
+  }
+  const maximum = Math.max(0, elements.viewport.scrollHeight - elements.viewport.clientHeight);
+  elements.viewport.scrollTop = Math.min(record.lastScrollTop, maximum);
+  speed = record.lastSpeedPxPerSecond;
+  elements.speed.value = String(speed);
+  updateSpeedPresentation("initial");
+  showRestoreMessage(record);
+  return true;
+}
+
+function persistReadingRecord() {
+  persistTimer = 0;
+  if (!activeDocumentRecord || !activeFileMeta || !activePdf) return;
+  const maximum = Math.max(
+    1,
+    elements.viewport.scrollHeight - elements.viewport.clientHeight,
+  );
+  const progressRatio = Math.max(0, Math.min(1, elements.viewport.scrollTop / maximum));
+  const tier = speedTier(speed);
+  let nextState = upsertDocumentRecord(
+    localState,
+    { ...activeFileMeta, fingerprint: activeDocumentRecord.fingerprint },
+    {
+      lastPageIndex: activeReadingPage,
+      lastScrollTop: Math.round(elements.viewport.scrollTop),
+      progressRatio,
+      lastSpeedPxPerSecond: speed,
+      lastBandKey: tier.themeKey,
+    },
+  );
+  const refreshedRecord = nextState.documents[activeDocumentRecord.id];
+  const estimate = computeReadingEstimate();
+  if (estimate && estimate.mode !== "empty") {
+    nextState = upsertRhythmRecord(nextState, refreshedRecord, {
+      speedPxPerSecond: speed,
+      bandKey: tier.themeKey,
+      bandName: tier.name,
+      cjkRateMin: estimate.cjkRate ? Math.round(estimate.cjkRate * 0.88) : 0,
+      cjkRateMax: estimate.cjkRate ? Math.round(estimate.cjkRate * 1.12) : 0,
+      englishRateMin: estimate.englishRate ? Math.round(estimate.englishRate * 0.88) : 0,
+      englishRateMax: estimate.englishRate ? Math.round(estimate.englishRate * 1.12) : 0,
+      pageIndex: activeReadingPage,
+    });
+  }
+  saveLocalState(nextState);
+  activeDocumentRecord = localState.documents[activeDocumentRecord.id] ?? refreshedRecord;
+}
+
+function schedulePersistReadingRecord() {
+  if (!activeDocumentRecord || persistTimer) return;
+  persistTimer = window.setTimeout(persistReadingRecord, 1_200);
 }
 
 window.__pdfFlowDiagnostics = Object.freeze({ snapshot: collectDiagnosticsSnapshot });
@@ -270,29 +541,52 @@ function computeReadingEstimate() {
   let numericUnits = 0;
   let englishWords = 0;
   let measuredHeight = 0;
+  let currentPageUnits = 0;
+  let currentPageHeight = 0;
 
   for (const pageNumber of nearbyPageNumbers(activeReadingPage)) {
     const stats = bestPageTextStats(pageNumber);
     const shell = pageShells[pageNumber - 1];
     if (!stats || !shell) continue;
+    const shellHeight = shell.offsetHeight || Number(shell.dataset.height) || 0;
+    const pageUnits = stats.cjkCharacters + stats.numericUnits + stats.englishWords;
     cjkCharacters += stats.cjkCharacters;
     numericUnits += stats.numericUnits;
     englishWords += stats.englishWords;
-    measuredHeight += shell.offsetHeight || Number(shell.dataset.height) || 0;
+    measuredHeight += shellHeight;
+    if (pageNumber === activeReadingPage) {
+      currentPageUnits = pageUnits;
+      currentPageHeight = shellHeight;
+    }
   }
 
   if (!measuredHeight) return null;
 
   const mode = readingMetricMode(cjkCharacters, englishWords);
-  if (mode === "empty") return { mode, cjkRate: 0, englishRate: 0 };
+  const cjkRate = ["cjk", "both"].includes(mode)
+    ? unitsPerMinute(cjkCharacters + numericUnits, measuredHeight, speed)
+    : 0;
+  const englishRate = unitsPerMinute(englishWords, measuredHeight, speed);
+  const windowDensity = (cjkCharacters + numericUnits + englishWords) / measuredHeight;
+  const currentDensity = currentPageHeight > 0 ? currentPageUnits / currentPageHeight : 0;
+  const densityRatio = windowDensity > 0 && currentDensity > 0
+    ? currentDensity / windowDensity
+    : null;
+  const remainingPixels = Math.max(
+    0,
+    elements.viewport.scrollHeight - elements.viewport.clientHeight - elements.viewport.scrollTop,
+  );
 
-  return {
-    cjkRate: ["cjk", "both"].includes(mode)
-      ? unitsPerMinute(cjkCharacters + numericUnits, measuredHeight, speed)
-      : 0,
-    englishRate: unitsPerMinute(englishWords, measuredHeight, speed),
+  return createRhythmSnapshot({
     mode,
-  };
+    cjkRate,
+    englishRate,
+    densityRatio,
+    remainingPixels,
+    pixelsPerSecond: speed,
+    tier: speedTier(speed),
+    source: ocrEnabled ? "ocr-or-native-text" : "native-text",
+  });
 }
 
 function replayClass(element, className) {
@@ -301,10 +595,24 @@ function replayClass(element, className) {
   element.classList.add(className);
 }
 
+function formatRateRange(range) {
+  if (!range || (!range.min && !range.max)) return "—";
+  if (range.min === range.max) return `≈${numberFormat.format(range.min)}`;
+  return `≈${numberFormat.format(range.min)}–${numberFormat.format(range.max)}`;
+}
+
+function formatFlowTime(range) {
+  if (!range) return "";
+  if (range.minMinutes === range.maxMinutes) {
+    return `以当前速度，估算还需阅读约 ${range.minMinutes} 分钟`;
+  }
+  return `以当前速度，估算还需阅读约 ${range.minMinutes}–${range.maxMinutes} 分钟`;
+}
+
 function renderSpeedEstimate(origin = "density") {
   const estimate = computeReadingEstimate();
   const signature = estimate
-    ? `${estimate.mode}:${estimate.cjkRate}:${estimate.englishRate}`
+    ? `${estimate.mode}:${estimate.cjkRange.min}:${estimate.cjkRange.max}:${estimate.englishRange.min}:${estimate.englishRange.max}:${estimate.density.key}:${estimate.remainingFlowTime?.minMinutes ?? 0}:${estimate.remainingFlowTime?.maxMinutes ?? 0}`
     : "waiting";
   if (signature === lastEstimateSignature) return;
   lastEstimateSignature = signature;
@@ -314,15 +622,26 @@ function renderSpeedEstimate(origin = "density") {
   elements.englishEstimate.hidden =
     !estimate || !["english", "both"].includes(estimate.mode);
   elements.estimateDivider.hidden = !estimate || estimate.mode !== "both";
+  elements.rhythmInsight.hidden = !estimate || estimate.mode === "empty";
 
   if (!estimate) {
     elements.estimateWaiting.textContent = "正在轻轻估算…";
+    elements.rhythmInsight.hidden = true;
+    elements.topReadingTime.hidden = true;
+    elements.topReadingTime.textContent = "";
   } else if (estimate.mode === "empty") {
     elements.estimateWaiting.textContent = "这一带还没有可估算的文字";
     elements.estimateWaiting.hidden = false;
+    elements.rhythmInsight.hidden = true;
+    elements.topReadingTime.hidden = true;
+    elements.topReadingTime.textContent = "";
   } else {
-    elements.cjkRate.textContent = numberFormat.format(estimate.cjkRate);
-    elements.englishRate.textContent = numberFormat.format(estimate.englishRate);
+    elements.cjkRate.textContent = formatRateRange(estimate.cjkRange);
+    elements.englishRate.textContent = formatRateRange(estimate.englishRange);
+    elements.densityHint.textContent = estimate.density.hint;
+    const flowText = formatFlowTime(estimate.remainingFlowTime);
+    elements.topReadingTime.hidden = !flowText;
+    elements.topReadingTime.textContent = flowText;
   }
 
   if (origin === "density" && !reducedMotion.matches) {
@@ -447,17 +766,22 @@ function showEmptyState() {
   clearFirstPageMessageTimer();
   clearTextSession();
   readyToMove = false;
+  activeDocumentRecord = null;
+  activeFileMeta = null;
   setPlaying(false);
   elements.emptyState.hidden = false;
   elements.loading.hidden = true;
   elements.controls.hidden = true;
   elements.ocrDock.hidden = true;
   elements.toggle.disabled = true;
-  elements.documentName.textContent = "准备好开始阅读";
+  elements.documentName.textContent = "让 PDF 安静地流过眼前";
   elements.fileButton.textContent = "选择 PDF";
   elements.pageStatus.textContent = "请选择一份 PDF";
   elements.progressBar.style.width = "0%";
+  elements.topReadingTime.hidden = true;
+  elements.topReadingTime.textContent = "";
   document.title = "夜晚的书斋";
+  renderHomeEcho();
 }
 
 function targetPageWidth() {
@@ -711,7 +1035,8 @@ async function disposeActiveDocument() {
   }
 }
 
-async function openPdf(sourceOrFactory, displayName) {
+async function openPdf(sourceOrFactory, displayName, { fileMeta = null } = {}) {
+  if (activeDocumentRecord) persistReadingRecord();
   const generation = ++loadGeneration;
   pendingSourceAbortController?.abort();
   const sourceController = new AbortController();
@@ -741,9 +1066,17 @@ async function openPdf(sourceOrFactory, displayName) {
   elements.errorPanel.hidden = true;
   elements.loading.hidden = true;
   elements.loadingText.textContent = "正在显影第一页";
+  activeFileMeta = fileMeta ?? {
+    fileName: displayName,
+    fileSize: null,
+    lastModified: 0,
+  };
+  activeDocumentRecord = activateDocumentRecord(activeFileMeta);
   elements.documentName.textContent = displayName;
   elements.pageStatus.textContent = "准备中";
   elements.progressBar.style.width = "0%";
+  elements.topReadingTime.hidden = true;
+  elements.topReadingTime.textContent = "";
   elements.controls.hidden = true;
   elements.ocrDock.hidden = true;
   elements.ocrStatus.hidden = true;
@@ -838,6 +1171,7 @@ async function openPdf(sourceOrFactory, displayName) {
   if (generation !== loadGeneration) return;
   const firstViewport = firstPage.getViewport({ scale: 1 });
   pageShells = buildPageShells(pdf, firstViewport);
+  maybeRestoreReadingPosition();
 
   renderScheduler = new RenderScheduler({
     concurrency: 2,
@@ -928,6 +1262,7 @@ function updateReadingStatus(force = false, now = 0) {
   const page = currentPageNumber();
   elements.pageStatus.textContent = page ? `${page} / ${pageCount} 页` : "准备中";
   handleReadingPageChange(page);
+  schedulePersistReadingRecord();
 }
 
 function animate(timestamp) {
@@ -978,6 +1313,8 @@ elements.speed.addEventListener("input", () => {
   updateSpeedPresentation("manual");
   animateManualSpeedChange(delta);
   queueSpeedParticle(delta);
+  queueSpeedCue(previousSpeed, speed);
+  schedulePersistReadingRecord();
 });
 
 function cacheOcrPageText(pageNumber, text, generation = loadGeneration) {
@@ -1201,6 +1538,11 @@ async function openLocalFile(file) {
     return;
   }
 
+  const fileMeta = createFileMetaFromFile(file);
+  const fileFingerprint = createDocumentFingerprint(fileMeta);
+  if (pendingResumeRecord && pendingResumeRecord.fingerprint !== fileFingerprint) {
+    elements.documentName.textContent = "所选文件与阅读回声不同，将作为新的 PDF 打开";
+  }
   try {
     await openPdf(
       (signal) => createFilePdfSource(file, {
@@ -1208,17 +1550,41 @@ async function openLocalFile(file) {
         signal,
       }),
       file.name,
+      { fileMeta },
     );
   } catch (error) {
     await disposeActiveDocument();
     showError(error);
   } finally {
+    pendingResumeRecord = null;
     elements.filePicker.value = "";
   }
 }
 
 elements.filePicker.addEventListener("change", () => {
   void openLocalFile(elements.filePicker.files?.[0]);
+});
+
+elements.recentBooks.addEventListener("click", (event) => {
+  const card = event.target instanceof Element
+    ? event.target.closest(".recent-book-card")
+    : null;
+  if (!(card instanceof HTMLButtonElement)) return;
+  const record = localState.documents[card.dataset.documentId];
+  if (!record) return;
+  pendingResumeRecord = record;
+  renderHomeEcho();
+  elements.documentName.textContent = `请选择《${displayTitle(record.fileName)}》继续阅读`;
+  elements.filePicker.click();
+});
+
+elements.clearRecords.addEventListener("click", () => {
+  const confirmed = window.confirm("清除本机保存的最近阅读、位置和阅读回声？PDF 文件不会被删除。");
+  if (!confirmed) return;
+  saveLocalState(clearLocalState());
+  activeDocumentRecord = null;
+  activeFileMeta = null;
+  renderHomeEcho();
 });
 
 document.addEventListener("dragover", (event) => {
@@ -1247,6 +1613,10 @@ elements.viewport.addEventListener("scroll", () => updateReadingStatus(true), {
   passive: true,
 });
 
+elements.viewport.addEventListener("click", (event) => {
+  if (isBackgroundClick(event)) togglePatternMode();
+});
+
 window.addEventListener("resize", () => {
   window.clearTimeout(resizeTimer);
   resizeTimer = window.setTimeout(resizeRenderedPages, 160);
@@ -1256,6 +1626,10 @@ window.addEventListener("keydown", (event) => {
   if (event.code !== "Space" || event.target instanceof HTMLInputElement) return;
   event.preventDefault();
   elements.toggle.click();
+});
+
+window.addEventListener("beforeunload", () => {
+  if (activeDocumentRecord) persistReadingRecord();
 });
 
 document.addEventListener("visibilitychange", () => {
@@ -1270,6 +1644,7 @@ setInterval(() => {
   fetch("./heartbeat", { cache: "no-store" }).catch(() => {});
 }, 30_000);
 
+applyPatternMode();
 updateSpeedPresentation("initial");
 requestAnimationFrame(animate);
 
@@ -1288,6 +1663,13 @@ try {
         disableAutoFetch: true,
       },
       config.fileName,
+      {
+        fileMeta: {
+          fileName: config.fileName,
+          fileSize: config.fileSize,
+          lastModified: config.lastModified ?? 0,
+        },
+      },
     );
   } else {
     showEmptyState();

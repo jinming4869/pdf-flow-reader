@@ -85,7 +85,9 @@ test("runtime client sends one synthesis at a time and correlates results by req
   assert.equal(children[0].sent[0].payload.text, "first");
   assert.equal(forkCalls[0][2].serialization, "advanced");
   assert.equal(forkCalls[0][2].env.ELECTRON_RUN_AS_NODE, "1");
-  assert.equal(forkCalls[0][2].env.PATH, process.env.PATH);
+  const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path");
+  assert.ok(pathKey);
+  assert.equal(forkCalls[0][2].env[pathKey], process.env[pathKey]);
 
   const firstId = children[0].sent[0].requestId;
   children[0].reply({

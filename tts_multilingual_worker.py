@@ -6,11 +6,10 @@ import io
 import json
 import logging
 import os
-import re
 import sys
-import tempfile
 import time
 import traceback
+import wave
 from pathlib import Path
 from typing import Any, Callable
 
@@ -18,6 +17,9 @@ from typing import Any, Callable
 PROTOCOL_VERSION = 1
 MODEL_NAME = "kokoro-v1.0.int8.onnx"
 VOICES_NAME = "voices-v1.0.bin"
+VOCAB_NAME = "tts-kokoro-vocab.json"
+SAMPLE_RATE = 24_000
+MAX_TOKENS = 509
 DEFAULT_VOICES = {"zh": "zf_xiaobei", "ja": "jf_alpha"}
 LANGUAGE_ALIASES = {
     "zh": "zh",
@@ -31,9 +33,6 @@ LANGUAGE_ALIASES = {
     "jpn": "ja",
     "japanese": "ja",
 }
-LATIN_FRAGMENT = re.compile(
-    r"[A-Za-z][A-Za-z0-9'’._/+:-]*(?:[ \t]+[A-Za-z][A-Za-z0-9'’._/+:-]*)*"
-)
 
 
 def normalize_language(language: object) -> str:
@@ -44,10 +43,6 @@ def normalize_language(language: object) -> str:
         raise ValueError(f"Unsupported multilingual TTS language: {language!r}") from exc
 
 
-def join_phonemes(parts: list[str]) -> str:
-    return " ".join(part.strip() for part in parts if part and part.strip()).strip()
-
-
 def g2p_value(g2p: Callable[[str], Any], text: str) -> str:
     value = g2p(text)
     if isinstance(value, tuple):
@@ -55,110 +50,147 @@ def g2p_value(g2p: Callable[[str], Any], text: str) -> str:
     return str(value or "").strip()
 
 
-def phonemize_chinese_mixed(
-    text: str,
-    chinese_g2p: Callable[[str], Any],
-    english_g2p: Callable[[str], Any],
-) -> str:
-    """Use the legacy Chinese frontend while preserving embedded Latin speech."""
-    parts: list[str] = []
-    cursor = 0
-    for match in LATIN_FRAGMENT.finditer(text):
-        if match.start() > cursor:
-            parts.append(g2p_value(chinese_g2p, text[cursor : match.start()]))
-        parts.append(g2p_value(english_g2p, match.group(0)))
-        cursor = match.end()
-    if cursor < len(text):
-        parts.append(g2p_value(chinese_g2p, text[cursor:]))
-    return join_phonemes(parts)
+def split_phoneme_batches(
+    phonemes: str,
+    vocab: dict[str, int],
+    max_tokens: int = MAX_TOKENS,
+) -> list[str]:
+    """Split by model-token count while retaining unknowns for diagnostics."""
+    if max_tokens < 1:
+        raise ValueError("max_tokens must be positive")
+    batches: list[str] = []
+    current: list[str] = []
+    token_count = 0
+    for character in phonemes:
+        contributes_token = character in vocab
+        if contributes_token and token_count >= max_tokens:
+            batches.append("".join(current).strip())
+            current = []
+            token_count = 0
+        current.append(character)
+        if contributes_token:
+            token_count += 1
+    final = "".join(current).strip()
+    if final:
+        batches.append(final)
+    return [batch for batch in batches if any(character in vocab for character in batch)]
+
+
+def pcm16_wav(samples: Any, sample_rate: int = SAMPLE_RATE) -> bytes:
+    import numpy as np
+
+    mono = np.asarray(samples, dtype=np.float32).reshape(-1)
+    pcm = (np.clip(mono, -1.0, 1.0) * 32_767.0).astype("<i2", copy=False)
+    output = io.BytesIO()
+    with wave.open(output, "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(sample_rate)
+        writer.writeframes(pcm.tobytes())
+    return output.getvalue()
+
+
+def trim_silence(samples: Any, sample_rate: int = SAMPLE_RATE) -> Any:
+    """Remove long model padding while retaining 30 ms around spoken audio."""
+    import numpy as np
+
+    mono = np.asarray(samples, dtype=np.float32).reshape(-1)
+    if mono.size == 0:
+        return mono
+    peak = float(np.max(np.abs(mono)))
+    if peak <= 0:
+        return mono
+    audible = np.flatnonzero(np.abs(mono) >= max(1e-4, peak * 1e-3))
+    if audible.size == 0:
+        return mono
+    padding = int(sample_rate * 0.03)
+    start = max(0, int(audible[0]) - padding)
+    end = min(mono.size, int(audible[-1]) + padding + 1)
+    return mono[start:end]
+
+
+def bundled_asset_path(name: str) -> Path:
+    return Path(__file__).resolve().with_name(name)
 
 
 class KokoroV10Runtime:
+    """Minimal permissive CJK runner for the fixed Kokoro v1.0 ONNX export."""
+
     def __init__(self, models_dir: str | Path):
         self.models_dir = Path(models_dir).expanduser().resolve()
-        self._kokoro: Any = None
+        self._session: Any = None
+        self._voices: Any = None
+        self._vocab: dict[str, int] = {}
         self._g2ps: dict[str, Callable[[str], Any]] = {}
-        self._espeak_shadow: tempfile.TemporaryDirectory[str] | None = None
-        self._espeak_lib_path: str | None = None
-        self._espeak_data_path: str | None = None
-        self._model_load_seconds = 0.0
 
-    def _required_paths(self) -> tuple[Path, Path]:
+    def _required_paths(self) -> tuple[Path, Path, Path]:
         model_path = self.models_dir / MODEL_NAME
         voices_path = self.models_dir / VOICES_NAME
-        missing = [path for path in (model_path, voices_path) if not path.is_file()]
+        vocab_path = bundled_asset_path(VOCAB_NAME)
+        missing = [path for path in (model_path, voices_path, vocab_path) if not path.is_file()]
         if missing:
             raise FileNotFoundError(
-                "Missing multilingual TTS model assets: "
-                + ", ".join(str(path) for path in missing)
+                "Missing multilingual TTS assets: " + ", ".join(str(path) for path in missing)
             )
-        return model_path, voices_path
+        return model_path, voices_path, vocab_path
 
-    def _ensure_model(self) -> float:
-        if self._kokoro is not None:
-            return 0.0
+    def _ensure_model(self) -> None:
+        if self._session is not None:
+            return
+        import numpy as np
+        import onnxruntime as ort
 
-        import espeakng_loader
-        from kokoro_onnx import Kokoro
-        from kokoro_onnx.config import EspeakConfig
-
-        model_path, voices_path = self._required_paths()
-        started = time.perf_counter()
-        parent_shadow = os.environ.get("PDF_FLOW_TTS_ESPEAK_SHADOW_DIR", "").strip()
-        if parent_shadow:
-            shadow_root = Path(parent_shadow).expanduser().resolve()
-            shadow_root.mkdir(parents=True, exist_ok=True)
-        else:
-            self._espeak_shadow = tempfile.TemporaryDirectory(prefix="pdf-flow-reader-espeak-")
-            shadow_root = Path(self._espeak_shadow.name)
-        os.symlink(
-            espeakng_loader.get_data_path(),
-            shadow_root / "espeak-ng-data",
-            target_is_directory=True,
-        )
-        self._espeak_lib_path = espeakng_loader.get_library_path()
-        self._espeak_data_path = str(shadow_root)
-        espeak_config = EspeakConfig(
-            lib_path=self._espeak_lib_path,
-            data_path=self._espeak_data_path,
-        )
-        self._kokoro = Kokoro(
+        model_path, voices_path, vocab_path = self._required_paths()
+        self._session = ort.InferenceSession(
             str(model_path),
-            str(voices_path),
-            espeak_config=espeak_config,
+            providers=["CPUExecutionProvider"],
         )
-        self._model_load_seconds = time.perf_counter() - started
-        available = set(self._kokoro.get_voices())
+        self._voices = np.load(voices_path)
+        with vocab_path.open(encoding="utf-8") as handle:
+            self._vocab = json.load(handle)["vocab"]
+        available = set(self._voices.keys())
         for voice in DEFAULT_VOICES.values():
             if voice not in available:
                 raise RuntimeError(f"Expected voice {voice!r} is absent from {VOICES_NAME}")
-        return self._model_load_seconds
 
     def _g2p_for(self, language: str) -> Callable[[str], Any]:
         if language in self._g2ps:
             return self._g2ps[language]
-
         if language == "zh":
             from misaki import zh
-            from misaki.espeak import EspeakG2P
-            from phonemizer.backend.espeak.wrapper import EspeakWrapper
             import jieba
 
-            # Importing misaki.espeak resets both paths to espeakng-loader's
-            # Unicode-containing package directory. Restore the ASCII shadow
-            # before EspeakBackend initializes its shared singleton.
-            EspeakWrapper.set_library(self._espeak_lib_path)
-            EspeakWrapper.set_data_path(self._espeak_data_path)
             jieba.setLogLevel(logging.WARNING)
-            chinese_g2p = zh.ZHG2P()
-            english_g2p = EspeakG2P(language="en-us")
-            g2p = lambda text: phonemize_chinese_mixed(text, chinese_g2p, english_g2p)
+            g2p = zh.ZHG2P()
         else:
             from misaki import ja
 
             g2p = ja.JAG2P(version="pyopenjtalk")
         self._g2ps[language] = g2p
         return g2p
+
+    def _create_audio(self, phonemes: str, voice: str, speed: float) -> tuple[Any, int]:
+        import numpy as np
+
+        voice_styles = self._voices[voice]
+        parts = []
+        unknown_count = 0
+        for batch in split_phoneme_batches(phonemes, self._vocab):
+            token_ids = [self._vocab[character] for character in batch if character in self._vocab]
+            unknown_count += sum(character not in self._vocab for character in batch)
+            if not token_ids:
+                continue
+            style = np.asarray(voice_styles[len(token_ids)], dtype=np.float32)
+            inputs = {
+                "tokens": np.asarray([[0, *token_ids, 0]], dtype=np.int64),
+                "style": style,
+                "speed": np.asarray([speed], dtype=np.float32),
+            }
+            audio = self._session.run(None, inputs)[0]
+            parts.append(trim_silence(audio))
+        if not parts:
+            raise ValueError("G2P produced no model tokens")
+        return np.concatenate(parts), unknown_count
 
     def synthesize(
         self,
@@ -176,7 +208,8 @@ class KokoroV10Runtime:
         if not 0.5 <= numeric_speed <= 2.0:
             raise ValueError("Speed must be between 0.5 and 2.0")
 
-        model_load_seconds = self._ensure_model()
+        started = time.perf_counter()
+        self._ensure_model()
         selected_voice = str(voice or DEFAULT_VOICES[normalized_language])
         if selected_voice != DEFAULT_VOICES[normalized_language]:
             raise ValueError(
@@ -184,48 +217,32 @@ class KokoroV10Runtime:
                 f"expected {DEFAULT_VOICES[normalized_language]!r}"
             )
 
-        g2p_started = time.perf_counter()
         phonemes = g2p_value(self._g2p_for(normalized_language), clean_text)
-        g2p_seconds = time.perf_counter() - g2p_started
         if not phonemes:
             raise ValueError("G2P produced no phonemes")
-
-        synthesis_started = time.perf_counter()
-        samples, sample_rate = self._kokoro.create(
-            phonemes,
-            voice=selected_voice,
-            speed=numeric_speed,
-            is_phonemes=True,
-        )
-        synthesis_seconds = time.perf_counter() - synthesis_started
-
-        import soundfile as sf
-
-        wav = io.BytesIO()
-        sf.write(wav, samples, sample_rate, format="WAV", subtype="PCM_16")
-        audio = wav.getvalue()
+        samples, unknown_count = self._create_audio(phonemes, selected_voice, numeric_speed)
+        audio = pcm16_wav(samples)
         return {
             "audioBase64": base64.b64encode(audio).decode("ascii"),
-            "sampleRate": int(sample_rate),
-            "durationMs": round((model_load_seconds + g2p_seconds + synthesis_seconds) * 1000),
-            "audioSeconds": round(len(samples) / int(sample_rate), 4),
+            "sampleRate": SAMPLE_RATE,
+            "durationMs": round((time.perf_counter() - started) * 1000),
+            "audioSeconds": round(len(samples) / SAMPLE_RATE, 4),
             "language": normalized_language,
             "voice": selected_voice,
             "speed": numeric_speed,
             "model": MODEL_NAME,
             "dtype": "int8",
             "phonemeCount": len(phonemes),
-            "unknownPhonemeCount": phonemes.count("❓"),
+            "unknownPhonemeCount": unknown_count,
         }
 
     def close(self) -> None:
         self._g2ps.clear()
-        self._kokoro = None
-        if self._espeak_shadow is not None:
-            self._espeak_shadow.cleanup()
-            self._espeak_shadow = None
-        self._espeak_lib_path = None
-        self._espeak_data_path = None
+        if self._voices is not None:
+            self._voices.close()
+        self._voices = None
+        self._session = None
+        self._vocab = {}
         gc.collect()
 
 
@@ -234,7 +251,7 @@ def emit(message: dict[str, Any]) -> None:
     sys.stdout.flush()
 
 
-def serialized_error(exc: Exception) -> dict[str, str]:
+def serialized_error(exc: Exception) -> dict[str, str | None]:
     return {
         "name": type(exc).__name__,
         "message": str(exc),

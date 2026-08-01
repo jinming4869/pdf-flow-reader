@@ -1,6 +1,6 @@
 # 夜晚的书斋 pdf-flow-reader 项目
 
-> 让 PDF 安静地流过眼前。
+> 让 PDF 阅读和亲吻纸质书一样好玩。
 
 一个本地、轻量、有阅读节奏感的 PDF 连续阅读器。打开后，页面会以可调的速度自动向下移动，让论文、报告和长文档读起来少一点手动操作。PDF 只在本机处理，不会上传。
 
@@ -8,8 +8,8 @@
 
 普通用户建议直接下载 GitHub Releases 里的桌面版压缩包或便携版程序，而不是下载源码。
 
-- macOS Apple Silicon：下载 `night-study-3.0.0-mac-arm64.zip`，解压后双击 `夜晚的书斋.app`。
-- Windows：下载 `night-study-3.0.0-windows-portable.exe`，双击运行。
+- macOS Apple Silicon：下载 `night-study-4.0.0-mac-arm64.zip`，解压后双击 `夜晚的书斋.app`。
+- Windows x64：下载 `night-study-4.0.0-windows-portable.exe`，双击运行。
 
 下载后可以对照 Release 中的 `SHA256SUMS.txt` 检查文件完整性。
 
@@ -75,6 +75,9 @@
 - 切档音效：朦胧背景使用轻合成器提示音；清晰背景使用本地切档音效，并按顺序播放避免重叠
 - 调整速度时有圆润的 `+N/-N` 文字粒子；系统开启“减少动画”后会自动停用
 - 原生文字型 PDF 直接开放朗读；扫描件或图片页会自动用本地 OCR 补全当前页附近最多五页
+- “希声”本地阅读陪伴：中文、英文、日文语音模型均随桌面版提供，首次朗读也不需要联网下载
+- 六档朗读各有自己的行为：慢速逐字陪伴、快速过滤朗读、阅读线点读、段首句接力，以及最快两档的“点哪里读哪里”
+- 中英、日英混排会分别选择适合的本地声音，再拼成连续语音
 - 大型 PDF 按区间读取；打开时先出现纸页底稿，只渲染当前页附近的高清画布
 - 缓存会按设备内存和页面像素量自动调整，跳页时取消旧位置的渲染与扫描任务
 - 当前页码和阅读进度
@@ -90,6 +93,8 @@
 
 OCR 引擎和四个语言包约占 19 MB。普通文字型 PDF 直接使用原生文字层，不加载 OCR；当前页缺少可朗读正文时，阅读器才自动识别当前页附近，用户也可以点“扫描页增强”重新识别。OCR 同时补足朗读文字并改进速度估算，全程在本机完成，不会改变或上传 PDF。
 
+桌面版还随包携带英文 q8 与中日文 v1.0 int8 Kokoro 模型、中文音素前端、Open JTalk 日文前端和字典。模型推理在独立 worker 进程中完成；停止朗读、跳页或更换文档时会真正终止旧推理。所有语音资源都在本机读取，不会把文字发送到外部服务。
+
 通过启动器打开 PDF 时，本地服务支持 HTTP Range；通过页面选择或拖入文件时，浏览器使用 `File.slice()`。两种方式都不会为了显示第一页而先把整份大文件复制进 JavaScript 内存。页面停留后会以最高 DPR 2 渲染，离开缓存窗口的画布会被释放，纸页位置和文字统计则保留。
 
 开发时可以在浏览器控制台运行 `window.__pdfFlowDiagnostics.snapshot()`，查看首屏时序、渲染/取消数量、画布像素预算、热区、数据来源和 OCR 状态。诊断数据只保留在当前本机页面中。
@@ -101,6 +106,16 @@ OCR 引擎和四个语言包约占 19 MB。普通文字型 PDF 直接使用原�
 ```sh
 npm install
 ```
+
+首次构建正式桌面包前，准备锁定的 Python 3.12 CJK worker 与离线模型：
+
+```sh
+uv sync --project runtime/tts-multilingual --frozen
+uv run --project runtime/tts-multilingual --frozen python scripts/build-multilingual-runtime.py
+uv run --project runtime/tts-multilingual --frozen python scripts/prepare-english-model.py
+```
+
+模型由脚本从固定的官方地址下载，并在打包前校验 SHA-256；大文件不会提交进 Git。
 
 运行永久回归测试：
 

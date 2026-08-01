@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,6 +33,10 @@ function firstExisting(candidates, existsImpl) {
     ?? null;
 }
 
+function existingOrNull(candidates, existsImpl) {
+  return candidates.find((candidate) => candidate && existsImpl(candidate)) ?? null;
+}
+
 export function resolveMultilingualTtsResources({
   appRoot = defaultAppRoot,
   resourcesPath = typeof process.resourcesPath === "string" ? process.resourcesPath : null,
@@ -51,8 +54,15 @@ export function resolveMultilingualTtsResources({
     resourcesPath ? join(resourcesPath, "tts-multilingual") : null,
     join(appRoot, "resources", "tts-multilingual"),
   ].filter(Boolean);
+  const executableName = platform === "win32"
+    ? "tts-multilingual-worker.exe"
+    : "tts-multilingual-worker";
 
   return {
+    executablePath: existingOrNull([
+      env.PDF_FLOW_TTS_EXECUTABLE,
+      ...packagedRoots.map((root) => join(root, "worker", executableName)),
+    ], existsImpl),
     pythonPath: firstExisting([
       env.PDF_FLOW_TTS_PYTHON,
       ...packagedRoots.map((root) => join(root, pythonRelative)),
@@ -78,13 +88,12 @@ export function createMultilingualTtsRuntimeClient({
   env = process.env,
   platform = process.platform,
   existsImpl = existsSync,
+  executablePath,
   pythonPath,
   modelsDir,
   workerPath,
   timeoutMs = 120_000,
   maxQueueSize = 8,
-  createShadowDir = () => mkdtempSync(join(tmpdir(), "pdf-flow-reader-espeak-")),
-  removeShadowDir = (path) => rmSync(path, { recursive: true, force: true }),
 } = {}) {
   const discovered = resolveMultilingualTtsResources({
     appRoot,
@@ -94,6 +103,7 @@ export function createMultilingualTtsRuntimeClient({
     existsImpl,
   });
   const resources = {
+    executablePath: executablePath ?? discovered.executablePath,
     pythonPath: pythonPath ?? discovered.pythonPath,
     modelsDir: modelsDir ?? discovered.modelsDir,
     workerPath: workerPath ?? discovered.workerPath,
@@ -105,26 +115,22 @@ export function createMultilingualTtsRuntimeClient({
   let nextRequestId = 1;
   let closed = false;
   const queue = [];
-  const childShadowDirs = new Map();
-
-  function cleanupChildResources(processChild) {
-    const shadowDir = childShadowDirs.get(processChild);
-    if (!shadowDir) return;
-    childShadowDirs.delete(processChild);
-    try {
-      removeShadowDir(shadowDir);
-    } catch {
-      // The OS temp directory remains recoverable and can be cleaned later.
-    }
-  }
 
   function assertResources() {
-    const missing = Object.entries(resources)
-      .filter(([, value]) => !value || !existsImpl(value))
-      .map(([name, value]) => `${name}: ${value || "未配置"}`);
+    const missing = [];
+    if (!resources.modelsDir || !existsImpl(resources.modelsDir)) {
+      missing.push(`modelsDir: ${resources.modelsDir || "未配置"}`);
+    }
+    const hasExecutable = resources.executablePath && existsImpl(resources.executablePath);
+    if (!hasExecutable) {
+      for (const name of ["pythonPath", "workerPath"]) {
+        const value = resources[name];
+        if (!value || !existsImpl(value)) missing.push(`${name}: ${value || "未配置"}`);
+      }
+    }
     if (missing.length) {
       throw runtimeError(
-        `中日文语音资源未安装（${missing.join("；")}）。请先准备 v1.0 int8 模型与 Python runtime。`,
+        `中日文语音资源未安装（${missing.join("；")}）。请重新安装包含离线语音资源的桌面版。`,
         "TTS_RESOURCES_MISSING",
       );
     }
@@ -154,10 +160,6 @@ export function createMultilingualTtsRuntimeClient({
       doomed.kill("SIGKILL");
     } catch {
       // The worker may already have exited.
-    } finally {
-      // SIGKILL prevents Python's finally blocks from running. The parent
-      // owns this exact mkdtemp directory, so clean it synchronously here.
-      cleanupChildResources(doomed);
     }
   }
 
@@ -172,7 +174,6 @@ export function createMultilingualTtsRuntimeClient({
   }
 
   function failChild(processChild, generation, error) {
-    cleanupChildResources(processChild);
     if (child !== processChild || childGeneration !== generation) return;
     child = null;
     childGeneration += 1;
@@ -192,8 +193,6 @@ export function createMultilingualTtsRuntimeClient({
         processChild.kill("SIGKILL");
       } catch {
         // The malformed worker may already have exited.
-      } finally {
-        cleanupChildResources(processChild);
       }
       failChild(
         processChild,
@@ -231,27 +230,19 @@ export function createMultilingualTtsRuntimeClient({
   function ensureChild() {
     if (child && !child.killed && child.exitCode === null) return child;
     assertResources();
-    const shadowDir = createShadowDir();
-    let processChild;
-    try {
-      processChild = spawnImpl(
-        resources.pythonPath,
-        ["-u", resources.workerPath],
-        {
-          env: {
-            ...env,
-            PDF_FLOW_TTS_MODELS_DIR: resources.modelsDir,
-            PDF_FLOW_TTS_ESPEAK_SHADOW_DIR: shadowDir,
-            PYTHONUNBUFFERED: "1",
-          },
-          stdio: ["pipe", "pipe", "inherit"],
+    const useExecutable = resources.executablePath && existsImpl(resources.executablePath);
+    const processChild = spawnImpl(
+      useExecutable ? resources.executablePath : resources.pythonPath,
+      useExecutable ? [] : ["-u", resources.workerPath],
+      {
+        env: {
+          ...env,
+          PDF_FLOW_TTS_MODELS_DIR: resources.modelsDir,
+          PYTHONUNBUFFERED: "1",
         },
-      );
-    } catch (error) {
-      removeShadowDir(shadowDir);
-      throw error;
-    }
-    childShadowDirs.set(processChild, shadowDir);
+        stdio: ["pipe", "pipe", "inherit"],
+      },
+    );
     child = processChild;
     const generation = ++childGeneration;
     const reader = createInterface({ input: processChild.stdout, crlfDelay: Infinity });

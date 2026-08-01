@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -23,33 +24,93 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
 
-      - name: Install dependencies
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v9
+        with:
+          enable-cache: true
+          cache-dependency-glob: runtime/tts-multilingual/uv.lock
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Install Node dependencies
         run: npm ci
 
-      - name: Run tests
+      - name: Install locked CJK build environment
+        run: uv sync --project runtime/tts-multilingual --frozen
+
+      - name: Run Node regression tests
         run: npm test
+
+      - name: Run multilingual worker unit tests
+        run: uv run --project runtime/tts-multilingual --frozen python -m pytest -q tests/tts_multilingual_worker_test.py
+
+      - name: Build and smoke-test bundled CJK runtime
+        run: uv run --project runtime/tts-multilingual --frozen python scripts/build-multilingual-runtime.py
+
+      - name: Prepare verified offline English model
+        run: uv run --project runtime/tts-multilingual --frozen python scripts/prepare-english-model.py
+
+      - name: Smoke-test offline English worker
+        run: npm run test:tts-english:smoke
 
       - name: Build desktop package
         run: npm run app:dist -- --publish never
 
+      - name: Smoke-test packaged macOS offline runtime
+        if: runner.os == 'macOS'
+        run: node scripts/packaged-release-smoke.mjs --resources "dist/mac-arm64/夜晚的书斋.app/Contents/Resources"
+
+      - name: Smoke-test packaged Windows offline runtime
+        if: runner.os == 'Windows'
+        run: node scripts/packaged-release-smoke.mjs --resources "dist/win-unpacked/resources"
+
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ runner.os }}
           path: |
             dist/*.zip
             dist/*.exe
           if-no-files-found: error
+          compression-level: 0
+
+  release:
+    name: Publish verified release assets
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v4
+
+      - name: Download desktop assets
+        uses: actions/download-artifact@v8
+        with:
+          pattern: desktop-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify platform assets and create checksums
+        shell: bash
+        run: |
+          test "$(find release-assets -maxdepth 1 -type f -name '*.zip' | wc -l)" -eq 1
+          test "$(find release-assets -maxdepth 1 -type f -name '*.exe' | wc -l)" -eq 1
+          cd release-assets
+          sha256sum *.zip *.exe > SHA256SUMS.txt
 
       - name: Attach assets to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
+          name: 夜晚的书斋 ${{ github.ref_name }} — 希声
+          generate_release_notes: false
+          body_path: docs/v4-hisheng/release-v4.0.0/RELEASE_NOTES.md
           files: |
-            dist/*.zip
-            dist/*.exe
+            release-assets/*.zip
+            release-assets/*.exe
+            release-assets/SHA256SUMS.txt

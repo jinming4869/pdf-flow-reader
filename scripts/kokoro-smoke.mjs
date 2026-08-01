@@ -1,11 +1,10 @@
-// smoke test: verify kokoro-js model loading and synthesis
-import { KokoroTTS } from "kokoro-js";
+// smoke test: verify the same offline worker path used by the application
+import { createTtsRuntimeClient } from "../tts-runtime-client.mjs";
 
 async function main() {
   console.log("1. Loading model (q8)...");
   const t1 = Date.now();
-  const tts = await KokoroTTS.from_pretrained("onnx-community/Kokoro-82M-ONNX", { dtype: "q8" });
-  console.log("   OK, loaded in", ((Date.now() - t1) / 1000).toFixed(1), "s");
+  const runtime = createTtsRuntimeClient();
 
   // list_voices() only prints to console, returns undefined.
   // Available non-English voices (from model manifest):
@@ -18,14 +17,16 @@ async function main() {
 
   console.log("3. Synthesizing EN...");
   const t2 = Date.now();
-  const audio = await tts.generate(
-    "The quiet study grows warmer when a voice reads alongside.",
-    { voice: "af_heart" },
-  );
+  const result = await runtime.synthesize({
+    text: "The quiet study grows warmer when a voice reads alongside.",
+    voice: "af_heart",
+    speed: 1,
+  });
+  console.log("   OK, loaded in", ((Date.now() - t1) / 1000).toFixed(1), "s");
   console.log("   OK,", Date.now() - t2, "ms");
-  console.log("   audio type:", typeof audio, "keys:", Object.keys(audio));
-  const wav = audio.toWav();
-  console.log("   WAV:", (wav.byteLength / 1024).toFixed(1), "KB");
+  console.log("   WAV:", (result.audio.byteLength / 1024).toFixed(1), "KB");
+  if (!result.audio.subarray(0, 4).equals(Buffer.from("RIFF"))) throw new Error("invalid WAV");
+  runtime.close();
 
   console.log("\nALL OK: Kokoro model ready for pdf-flow-reader");
 }

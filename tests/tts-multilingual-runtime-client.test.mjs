@@ -41,15 +41,12 @@ class FakePythonChild extends EventEmitter {
 function createHarness(options = {}) {
   const children = [];
   const spawnCalls = [];
-  const removedShadowDirs = [];
-  let nextShadowDir = 1;
   const client = createMultilingualTtsRuntimeClient({
+    executablePath: false,
     pythonPath: "/fake/python",
     modelsDir: "/fake/models",
     workerPath: "/fake/worker.py",
     existsImpl: () => true,
-    createShadowDir: () => `/fake/shadow-${nextShadowDir++}`,
-    removeShadowDir: (path) => removedShadowDirs.push(path),
     timeoutMs: 1_000,
     spawnImpl: (...args) => {
       spawnCalls.push(args);
@@ -59,7 +56,7 @@ function createHarness(options = {}) {
     },
     ...options,
   });
-  return { children, client, removedShadowDirs, spawnCalls };
+  return { children, client, spawnCalls };
 }
 
 test("resource discovery honors explicit environment paths", () => {
@@ -75,6 +72,7 @@ test("resource discovery honors explicit environment paths", () => {
     existsImpl: (value) => values.has(value),
   });
   assert.deepEqual(result, {
+    executablePath: null,
     pythonPath: "/chosen/python",
     modelsDir: "/chosen/models",
     workerPath: "/chosen/worker.py",
@@ -119,8 +117,8 @@ test("Python runtime sends NDJSON and decodes WAV plus model metadata", async (t
   assert.equal(result.unknownPhonemeCount, 0);
 });
 
-test("aborting active Python inference hard-kills the worker, cleans resources, and rebuilds", async (t) => {
-  const { children, client, removedShadowDirs } = createHarness();
+test("aborting active Python inference hard-kills the worker and rebuilds", async (t) => {
+  const { children, client } = createHarness();
   t.after(() => client.close());
   const controller = new AbortController();
   const abandoned = client.synthesize(
@@ -132,7 +130,6 @@ test("aborting active Python inference hard-kills the worker, cleans resources, 
   controller.abort();
   await assert.rejects(abandoned, { name: "AbortError" });
   assert.deepEqual(oldChild.killSignals, ["SIGKILL"]);
-  assert.deepEqual(removedShadowDirs, ["/fake/shadow-1"]);
   assert.equal(children.length, 2);
 
   const requestId = children[1].sent[0].requestId;
@@ -163,4 +160,24 @@ test("missing local CJK resources fail lazily with an actionable code", async ()
     (error) => error?.code === "TTS_RESOURCES_MISSING" && /中日文语音资源未安装/.test(error.message),
   );
   client.close();
+});
+
+test("packaged runtime launches its self-contained executable without Python arguments", async (t) => {
+  const { children, client, spawnCalls } = createHarness({
+    executablePath: "/bundle/tts-multilingual/worker/tts-multilingual-worker",
+  });
+  t.after(() => client.close());
+  const pending = client.synthesize({ text: "希声", language: "zh" });
+  assert.equal(spawnCalls[0][0], "/bundle/tts-multilingual/worker/tts-multilingual-worker");
+  assert.deepEqual(spawnCalls[0][1], []);
+  const requestId = children[0].sent[0].requestId;
+  children[0].reply({
+    type: "result",
+    requestId,
+    result: {
+      audioBase64: Buffer.from("packaged").toString("base64"),
+      sampleRate: 24_000,
+    },
+  });
+  assert.equal((await pending).audio.toString(), "packaged");
 });

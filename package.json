@@ -1,13 +1,17 @@
 {
   "name": "pdf-flow-reader",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "private": false,
-  "description": "A calm, local-only PDF auto-scroll reader.",
+  "description": "Make PDF reading as playful as kissing a paper book.",
   "type": "module",
   "main": "electron-main.mjs",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
     "test:tts-multilingual:smoke": "node scripts/tts-multilingual-smoke.mjs",
+    "test:tts-english:smoke": "node scripts/kokoro-smoke.mjs",
+    "test:packaged-release": "node scripts/packaged-release-smoke.mjs",
+    "runtime:prepare-english": "python scripts/prepare-english-model.py",
+    "runtime:build": "python scripts/build-multilingual-runtime.py",
     "app:start": "electron .",
     "app:dir": "electron-builder --dir",
     "app:dist": "electron-builder"
@@ -66,13 +70,17 @@
       "tts-sentence.mjs",
       "tts-segment-picker.mjs",
       "tts-worker.mjs",
+      "wav-pcm.mjs",
       "tts_multilingual_worker.py",
+      "tts-kokoro-vocab.json",
       "scripts/proxy-bootstrap.mjs",
       "scripts/tts-multilingual-smoke.mjs",
-      "docs/**/*",
       "vendor/**/*",
       "build/**/*",
       "!build/*-source.jpg",
+      "!build/runtime/**/*",
+      "!build/tts-multilingual-pyinstaller/**/*",
+      "!node_modules/@huggingface/transformers/.cache/**/*",
       "package.json",
       "LICENSE",
       "THIRD_PARTY_NOTICES.md"
@@ -80,6 +88,23 @@
     "directories": {
       "output": "dist"
     },
+    "afterPack": "scripts/after-pack.cjs",
+    "extraResources": [
+      {
+        "from": "build/runtime/tts-multilingual",
+        "to": "tts-multilingual",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "build/runtime/tts-english",
+        "to": "tts-english",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "build/icon.icns",

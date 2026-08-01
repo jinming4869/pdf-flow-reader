@@ -14,11 +14,21 @@ test("Electron package includes the TTS runtime and worker entrypoints", () => {
   assert.ok(packageJson.build.files.includes("tts-multilingual-runtime-client.mjs"));
   assert.ok(packageJson.build.files.includes("tts-runtime-router.mjs"));
   assert.ok(packageJson.build.files.includes("tts-worker.mjs"));
+  assert.ok(packageJson.build.files.includes("wav-pcm.mjs"));
+  assert.ok(packageJson.build.files.includes("tts-kokoro-vocab.json"));
   assert.ok(packageJson.build.files.includes("tts_multilingual_worker.py"));
   assert.ok(packageJson.build.files.includes("tts-aesthetic-walk.mjs"));
   assert.ok(packageJson.build.files.includes("tts-point-gesture.mjs"));
   assert.ok(packageJson.build.files.includes("tts-point-sentence.mjs"));
   assert.ok(packageJson.build.files.includes("tts-point-session.mjs"));
+  assert.deepEqual(packageJson.build.extraResources.map((entry) => entry.to), [
+    "tts-multilingual",
+    "tts-english",
+  ]);
+  assert.ok(packageJson.build.files.includes("!build/runtime/**/*"));
+  assert.ok(packageJson.build.files.includes("!build/tts-multilingual-pyinstaller/**/*"));
+  assert.ok(!packageJson.build.files.includes("docs/**/*"));
+  assert.equal(packageJson.build.afterPack, "scripts/after-pack.cjs");
 });
 
 class FakeChild extends EventEmitter {

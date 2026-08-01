@@ -16,6 +16,14 @@ let activeIconMode = null;
 let iconTimer = null;
 let pendingPdfPath = findPdfArgument(process.argv.slice(1));
 
+process.on("unhandledRejection", (reason) => {
+  console.error("夜晚的书斋主进程未处理异步错误：", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("夜晚的书斋主进程异常：", error);
+});
+
 function findPdfArgument(args) {
   for (const arg of args) {
     if (!arg || arg.startsWith("--")) continue;
@@ -78,6 +86,9 @@ function startReaderServer(pdfPath = null) {
         rejectStart(new Error("本地阅读服务没有取得端口。"));
         return;
       }
+      server.on("error", (error) => {
+        console.error("本地阅读服务运行时错误：", error);
+      });
       resolveStart({ server, url: `http://127.0.0.1:${address.port}/` });
     };
 

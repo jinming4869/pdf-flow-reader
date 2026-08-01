@@ -21,8 +21,17 @@ export function createEmptyState(now = new Date()) {
       recentDocumentLimit: DEFAULT_RECENT_LIMIT,
       restoreLastPositionEnabled: true,
       rhythmPatternMode: "soft",
-      ttsPreferredMode: "off",
-      ttsConsentGiven: false,
+      ttsEnabled: false,
+      ttsVolume: 0.42,
+      ttsMuted: true,
+      ttsProviderMode: "local",
+      ttsLocalProvider: "kokoro-local",
+      ttsVoiceEn: "af_heart",
+      ttsVoiceZh: "af_heart",
+      ttsVoiceJa: "af_heart",
+      openaiTtsApiKey: "",
+      openaiTtsVoice: "marin",
+      openaiTtsConsentGiven: false,
     },
   };
 }
@@ -42,12 +51,25 @@ function sanitizeState(value, now = new Date()) {
   const fallback = createEmptyState(now);
   if (!value || typeof value !== "object") return fallback;
 
+  const rawPreferences =
+    value.preferences && typeof value.preferences === "object"
+      ? value.preferences
+      : {};
+  const migratedTtsEnabled = typeof rawPreferences.ttsEnabled === "boolean"
+    ? rawPreferences.ttsEnabled
+    : ["whisper", "flow"].includes(rawPreferences.ttsMode);
+  const migratedTtsConsent = typeof rawPreferences.openaiTtsConsentGiven === "boolean"
+    ? rawPreferences.openaiTtsConsentGiven
+    : Boolean(rawPreferences.ttsConsentGiven);
   const preferences = {
     ...fallback.preferences,
-    ...(value.preferences && typeof value.preferences === "object"
-      ? value.preferences
-      : {}),
+    ...rawPreferences,
+    ttsEnabled: migratedTtsEnabled,
+    openaiTtsConsentGiven: migratedTtsConsent,
   };
+  delete preferences.ttsMode;
+  delete preferences.ttsPreferredMode;
+  delete preferences.ttsConsentGiven;
   preferences.defaultSpeedPxPerSecond = Math.max(
     4,
     Math.min(64, Math.round(sanitizeNumber(preferences.defaultSpeedPxPerSecond, 16))),
@@ -63,12 +85,7 @@ function sanitizeState(value, now = new Date()) {
   preferences.rhythmPatternMode = ["soft", "clear"].includes(preferences.rhythmPatternMode)
     ? preferences.rhythmPatternMode
     : "soft";
-  preferences.ttsPreferredMode = ["off", "local-only", "api"].includes(
-    preferences.ttsPreferredMode,
-  )
-    ? preferences.ttsPreferredMode
-    : "off";
-  preferences.ttsConsentGiven = Boolean(preferences.ttsConsentGiven);
+  preferences.openaiTtsConsentGiven = Boolean(preferences.openaiTtsConsentGiven);
 
   return {
     schemaVersion: SCHEMA_VERSION,

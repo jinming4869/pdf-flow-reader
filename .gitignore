@@ -4,3 +4,13 @@
 Thumbs.db
 node_modules/
 dist/
+build/runtime/
+build/tts-multilingual-pyinstaller/
+runtime/tts-multilingual/.venv/
+experiments/tts-multilingual-poc/.venv/
+experiments/tts-multilingual-poc/models/
+experiments/tts-multilingual-poc/.cache/
+output/speech/**/*.wav
+tmp/speech/
+__pycache__/
+*.py[cod]

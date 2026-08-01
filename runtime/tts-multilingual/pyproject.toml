@@ -1,0 +1,20 @@
+[project]
+name = "pdf-flow-reader-cjk-runtime"
+version = "4.0.0"
+description = "Reproducible build environment for the bundled Hisheng CJK TTS worker"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "cn2an==0.5.24",
+  "jieba==0.42.1",
+  "misaki-fork==0.9.6",
+  "numpy==2.5.1",
+  "onnxruntime==1.28.0",
+  "ordered-set==4.1.0",
+  "pyinstaller==6.21.0",
+  "pyopenjtalk==0.4.1",
+  "pypinyin==0.55.0",
+  "pytest==8.4.1",
+]
+
+[tool.uv]
+package = false

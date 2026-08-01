@@ -256,6 +256,43 @@ button,
   white-space: nowrap;
 }
 
+.point-read-button {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 7px 12px;
+  border: 1px solid rgba(57, 86, 70, 0.2);
+  border-radius: 999px;
+  color: var(--accent-dark);
+  background: rgba(255, 255, 252, 0.58);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 720;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.point-read-button:hover,
+.point-read-button:focus-visible,
+.point-read-button[aria-pressed="true"] {
+  border-color: rgba(57, 86, 70, 0.38);
+  background: color-mix(in srgb, var(--accent), white 88%);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent-dark), transparent 86%);
+}
+
+.point-read-button[aria-busy="true"] {
+  cursor: progress;
+}
+
+.point-read-status {
+  max-width: 180px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .file-button,
 .finish button {
   border: 1px solid rgba(57, 86, 70, 0.24);
@@ -397,12 +434,115 @@ button,
 }
 
 .page-canvas {
+  position: relative;
+  z-index: 2;
   opacity: 0;
   transition: opacity 220ms ease-out;
 }
 
 .page-canvas.is-visible {
   opacity: 1;
+}
+
+.point-read-text-layer,
+.point-read-highlight-layer {
+  position: absolute;
+  inset: 0;
+}
+
+.point-read-text-layer {
+  z-index: 4;
+  overflow: hidden;
+  pointer-events: auto;
+  user-select: text;
+}
+
+.point-read-text-fragment {
+  position: absolute;
+  display: block;
+  overflow: hidden;
+  color: rgba(25, 32, 28, 0.01);
+  font-family: serif;
+  line-height: 1;
+  white-space: pre;
+  pointer-events: auto;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.point-read-text-fragment::selection {
+  color: transparent;
+  background: color-mix(in srgb, var(--accent), transparent 62%);
+}
+
+.point-read-highlight-layer {
+  z-index: 3;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.point-read-highlight-fragment {
+  position: absolute;
+  border-radius: 0.34em;
+  background: rgba(224, 207, 135, 0.2);
+  box-shadow: 0 0 0 1px rgba(112, 104, 65, 0.04);
+  opacity: 0;
+  transform: scaleY(0.82);
+  transform-origin: center;
+  transition: opacity 150ms ease, transform 180ms ease, background 180ms ease;
+}
+
+.point-read-highlight-layer[data-phase="hover"] .point-read-highlight-fragment {
+  opacity: 0.72;
+  transform: scaleY(0.9);
+}
+
+.point-read-highlight-layer[data-phase="queued"] .point-read-highlight-fragment,
+.point-read-highlight-layer[data-phase="warming"] .point-read-highlight-fragment {
+  opacity: 0.82;
+  transform: scaleY(0.96);
+  background: rgba(219, 197, 111, 0.3);
+}
+
+.point-read-highlight-layer[data-phase="speaking"] .point-read-highlight-fragment {
+  opacity: 0.88;
+  transform: scaleY(1);
+  background: color-mix(in srgb, var(--accent), transparent 73%);
+  animation: point-read-breathe 1.8s ease-in-out infinite;
+}
+
+@keyframes point-read-breathe {
+  0%, 100% { filter: saturate(0.86); }
+  50% { filter: saturate(1.08); }
+}
+
+.tts-focus {
+  position: absolute;
+  z-index: 3;
+  height: 2px;
+  border-radius: 0;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent-dark), transparent 44%),
+    color-mix(in srgb, var(--accent-dark), transparent 4%) 16% 84%,
+    color-mix(in srgb, var(--accent-dark), transparent 44%)
+  );
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent-dark), transparent 80%);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.tts-focus[data-phase="tracking"] {
+  opacity: 0.5;
+}
+
+.tts-focus[data-phase="queued"] {
+  opacity: 0.62;
+}
+
+.tts-focus[data-phase="speaking"] {
+  opacity: 0.92;
 }
 
 @keyframes page-breath {
@@ -788,9 +928,10 @@ body.is-dragging::after {
   position: fixed;
   z-index: 25;
   inset: auto auto 20px 50%;
-  width: min(720px, calc(100vw - 36px));
+  width: min(900px, calc(100vw - 36px));
   min-height: 76px;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(320px, 1fr) minmax(190px, 230px) auto;
   align-items: center;
   gap: 14px;
   padding: 10px 12px;
@@ -833,10 +974,80 @@ body.is-dragging::after {
   letter-spacing: -0.12em;
 }
 
+.tts-controls {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  align-items: center;
+}
+
+.tts-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.tts-mode-button {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(82, 117, 98, 0.18);
+  border-radius: 999px;
+  color: var(--accent-dark);
+  background: rgba(255, 255, 252, 0.46);
+  font-size: 12px;
+  font-weight: 720;
+  cursor: pointer;
+}
+
+.tts-mode-button:hover,
+.tts-mode-button:focus-visible,
+.tts-manual-read-button:hover,
+.tts-manual-read-button:focus-visible {
+  border-color: rgba(82, 117, 98, 0.34);
+  background: rgba(255, 255, 252, 0.72);
+}
+
+.tts-mode-button:disabled {
+  opacity: 0.48;
+  cursor: default;
+}
+
+.tts-manual-read-button {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(82, 117, 98, 0.2);
+  border-radius: 50%;
+  color: var(--accent-dark);
+  background: rgba(255, 255, 252, 0.5);
+  font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+  font-size: 15px;
+  font-weight: 720;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tts-manual-read-button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.tts-status {
+  max-width: 240px;
+  overflow: hidden;
+  color: rgba(68, 83, 74, 0.66);
+  font-size: 11px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .speed-experience {
   position: relative;
   min-width: 0;
-  flex: 1;
   display: grid;
   grid-template-columns: minmax(164px, 1fr) minmax(150px, 190px);
   grid-template-areas:
@@ -1192,6 +1403,67 @@ body.is-dragging::after {
   padding: 8px 15px;
 }
 
+.tts-diagnostics-panel {
+  position: fixed;
+  z-index: 50;
+  right: 18px;
+  bottom: 118px;
+  width: min(520px, calc(100vw - 36px));
+  max-height: min(560px, calc(100vh - 150px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(50, 70, 58, 0.16);
+  border-radius: 16px;
+  color: var(--ink);
+  background: rgba(255, 255, 252, 0.9);
+  box-shadow: 0 18px 48px rgba(35, 48, 40, 0.2);
+  backdrop-filter: blur(18px);
+}
+
+.tts-diagnostics-panel[hidden] {
+  display: none;
+}
+
+.tts-diagnostics-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--accent-dark);
+  font-size: 13px;
+}
+
+.tts-diagnostics-heading button,
+.tts-diagnostics-panel > button {
+  border: 1px solid rgba(82, 117, 98, 0.2);
+  border-radius: 999px;
+  color: var(--accent-dark);
+  background: rgba(255, 255, 252, 0.72);
+  cursor: pointer;
+}
+
+.tts-diagnostics-heading button {
+  width: 24px;
+  height: 24px;
+}
+
+.tts-diagnostics-panel > button {
+  justify-self: start;
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.tts-diagnostics-panel pre {
+  max-height: 420px;
+  margin: 0;
+  overflow: auto;
+  color: rgba(42, 47, 43, 0.86);
+  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap;
+}
+
 .error-panel {
   position: fixed;
   z-index: 40;
@@ -1245,6 +1517,16 @@ body.is-dragging::after {
     display: none;
   }
 
+  .point-read-button {
+    min-height: 30px;
+    padding: 6px 9px;
+    font-size: 11px;
+  }
+
+  .point-read-status {
+    display: none;
+  }
+
   .file-button {
     padding: 7px 10px;
   }
@@ -1280,11 +1562,20 @@ body.is-dragging::after {
   .controls {
     width: calc(100vw - 20px);
     min-height: 92px;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "toggle speed"
+      "tts tts";
     gap: 9px;
     bottom: 10px;
     padding: 9px;
     border-radius: 16px;
   }
+
+  .toggle { grid-area: toggle; }
+  .speed-experience { grid-area: speed; }
+  .tts-controls { grid-area: tts; }
+  .page-status { grid-area: page; }
 
   .toggle {
     min-width: 68px;
@@ -1327,6 +1618,13 @@ body.is-dragging::after {
   }
 }
 
+@media (any-hover: none) and (any-pointer: coarse) {
+  .point-read-button,
+  .point-read-status {
+    display: none !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .loading-dot,
   .empty-mark,
@@ -1338,11 +1636,16 @@ body.is-dragging::after {
   .speed-experience.is-slowing-down .estimate-item strong,
   .speed-estimate.is-density-morph .estimate-item,
   .speed-estimate.is-density-morph .estimate-waiting,
+  .point-read-highlight-fragment,
   .speed-particle {
     animation: none;
   }
 
   .page-canvas {
+    transition: none;
+  }
+
+  .point-read-highlight-fragment {
     transition: none;
   }
 

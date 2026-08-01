@@ -22,6 +22,16 @@
         </div>
       </div>
       <div class="topbar-actions">
+        <button
+          id="ttsPointReadButton"
+          class="point-read-button"
+          type="button"
+          aria-pressed="false"
+          aria-describedby="ttsPointReadStatus"
+          title="H：开启或关闭点击朗读"
+          hidden
+        >点击以朗读：关</button>
+        <span id="ttsPointReadStatus" class="point-read-status" role="status" aria-live="polite" hidden></span>
         <div id="topReadingTime" class="top-reading-time" aria-live="polite" hidden></div>
         <label id="fileButton" class="file-button" for="filePicker">选择 PDF</label>
       </div>
@@ -104,17 +114,41 @@
         <div id="speedParticles" class="speed-particles" aria-hidden="true"></div>
       </div>
 
+      <div class="tts-controls" aria-label="希声随读控制">
+        <div class="tts-actions">
+          <button id="ttsModeButton" class="tts-mode-button" type="button" title="H：开启或关闭希声">希声：关</button>
+          <button
+            id="ttsManualReadButton"
+            class="tts-manual-read-button"
+            type="button"
+            aria-label="朗读阅读线下方最近一句"
+            title="R：朗读阅读线下方最近一句"
+            hidden
+          >♪</button>
+        </div>
+        <span id="ttsStatus" class="tts-status" role="status" aria-live="polite">希声静默</span>
+      </div>
+
       <div id="pageStatus" class="page-status" aria-live="polite">准备中</div>
     </section>
 
-    <aside id="ocrDock" class="ocr-dock" aria-label="扫描页阅读速度估算" hidden>
+    <aside id="ocrDock" class="ocr-dock" aria-label="OCR 扫描增强" hidden>
       <button id="ocrButton" type="button" aria-describedby="ocrHelp" disabled>
-        扫描页增强估算
+        扫描页增强
       </button>
       <span id="ocrHelp" class="ocr-help" role="note">
-        扫描件或图片页才需要。它会在本机识别附近 5 页，让“字/分、词/分”估算更准；普通文字 PDF 通常不用开启，也不会改变或上传 PDF。
+        原生文字可直接朗读；扫描页会在文字缺失时自动补全，并改善阅读速度估算。全部在本机处理。
       </span>
       <span id="ocrStatus" class="ocr-status" role="status" hidden></span>
+    </aside>
+
+    <aside id="ttsDiagnosticsPanel" class="tts-diagnostics-panel" aria-label="希声诊断" hidden>
+      <div class="tts-diagnostics-heading">
+        <strong>希声诊断</strong>
+        <button id="ttsDiagnosticsClose" type="button" aria-label="关闭希声诊断">×</button>
+      </div>
+      <pre id="ttsDiagnosticsOutput">按 D 打开或刷新希声诊断。</pre>
+      <button id="ttsDiagnosticsSelfTest" type="button">本地语音自检</button>
     </aside>
 
     <div id="errorPanel" class="error-panel" role="alert" hidden>

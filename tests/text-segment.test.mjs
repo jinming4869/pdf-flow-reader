@@ -42,6 +42,49 @@ test("segmentsFromPdfTextContent converts PDF.js text items into future TTS segm
   });
   assert.equal(segments.length, 2);
   assert.equal(segments[0].bbox.x, 12);
+  assert.equal(segments[0].hasEOL, false);
   assert.equal(segments[1].bbox.height, 11);
   assert.equal(plainTextFromSegments(segments), "Hello 世界");
+});
+
+test("segmentsFromPdfTextContent can map rotated PDF rectangles into viewport coordinates", () => {
+  const segments = segmentsFromPdfTextContent({
+    pageIndex: 0,
+    viewport: {
+      convertToViewportRectangle([x0, y0, x1, y1]) {
+        return [200 - y1, x0, 200 - y0, x1];
+      },
+    },
+    textContent: {
+      items: [{
+        str: "Rotated sentence.",
+        width: 80,
+        height: 12,
+        transform: [12, 0, 0, 12, 20, 40],
+      }],
+    },
+  });
+
+  assert.deepEqual(segments[0].bbox, {
+    x: 148,
+    y: 20,
+    width: 12,
+    height: 80,
+  });
+});
+
+test("createTextSegment preserves paragraph and PDF layout hints", () => {
+  const segment = createTextSegment({
+    text: "A line.",
+    paragraphId: 4,
+    blockId: "body",
+    hasEOL: true,
+    fontName: "Times",
+    direction: "ltr",
+  });
+  assert.equal(segment.paragraphId, "4");
+  assert.equal(segment.blockId, "body");
+  assert.equal(segment.hasEOL, true);
+  assert.equal(segment.fontName, "Times");
+  assert.equal(segment.direction, "ltr");
 });

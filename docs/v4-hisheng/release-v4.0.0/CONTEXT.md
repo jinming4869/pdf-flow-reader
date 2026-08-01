@@ -4,7 +4,7 @@
 
 - 本地分支：`feature/v4-hisheng`
 - 版本已固定为 `4.0.0`，本地开发和打包边界已完成。
-- Node 回归 `289/289`，Python worker 回归 `4/4`。
+- Node 回归 `289/289`，Python worker 回归 `5/5`。
 - macOS Apple Silicon 候选包已验证中英、日英、纯英文 24 kHz mono PCM16 WAV，以及硬取消后 worker 重建。
 - 当前候选 ZIP：`dist/night-study-4.0.0-mac-arm64.zip`，392,989,571 bytes，SHA-256 `d2771f0da4a6de263cfc12c0393c3c668b16aed7901e7ceec8a5bb62de1731ab`。
 - draft PR #1 尚待更新；提交后以 macOS/Windows GitHub Actions 作为最终跨平台验收。

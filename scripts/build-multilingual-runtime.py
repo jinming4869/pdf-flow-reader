@@ -176,6 +176,8 @@ def smoke_worker(executable: Path, models_dir: Path) -> None:
         [str(executable)],
         input=payload,
         text=True,
+        encoding="utf-8",
+        errors="strict",
         capture_output=True,
         env=env,
         timeout=240,

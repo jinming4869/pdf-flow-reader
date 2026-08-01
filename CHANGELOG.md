@@ -38,7 +38,7 @@
 - 用 PyInstaller onedir 携带 Python 3.12、ONNX Runtime、Misaki、pyopenjtalk 和日文字典。
 - GitHub Actions 在 macOS 与 Windows 各自构建原生 worker，自动下载并校验固定哈希的模型。
 - Release workflow 只有在双平台构建均成功后才附加 macOS zip、Windows portable exe 与统一 `SHA256SUMS.txt`。
-- 回归测试扩展到 289 项 Node 测试与 4 项 Python worker 单测。
+- 回归测试扩展到 289 项 Node 测试与 5 项 Python worker 单测。
 
 ### 范围说明
 

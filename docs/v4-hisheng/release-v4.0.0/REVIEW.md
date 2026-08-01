@@ -6,7 +6,7 @@
 
 - 计划符合性：产物、平台、模型、非目标与 `PLAN.md` 一致。
 - 许可边界：正式 CJK runtime 不含 `phonemizer-fork`、eSpeak、`kokoro-onnx`；可分发依赖和 PyInstaller Bootloader Exception 已记入第三方声明。
-- 回归：`npm test` 通过 289/289；Python worker 通过 4/4。
+- 回归：`npm test` 通过 289/289；Python worker 通过 5/5。
 - 真实模型：打包后中英混排、日英混排和纯英文均产生 24 kHz mono PCM16 WAV。
 - 取消语义：打包后的 CJK worker 在 AbortSignal 后被硬终止，随后请求可以重建并生成音频。
 - 打包完整性：自包含 CJK worker、英文模型、日文字典；未夹带内部发布文档、临时 runtime 构建树、`onnxruntime-web`、Transformers 开发源码或多余声音。

@@ -2,6 +2,7 @@ from tts_multilingual_worker import (
     DEFAULT_VOICES,
     MAX_TOKENS,
     MODEL_NAME,
+    configure_utf8_stdio,
     normalize_language,
     split_phoneme_batches,
 )
@@ -25,3 +26,18 @@ def test_phoneme_batches_use_model_token_count_and_retain_unknowns():
 
 def test_phoneme_batch_limit_matches_voice_style_table():
     assert MAX_TOKENS == 509
+
+
+def test_ndjson_protocol_forces_utf8_on_legacy_platform_streams():
+    calls = []
+
+    class Stream:
+        def reconfigure(self, **options):
+            calls.append(options)
+
+    configure_utf8_stdio((Stream(), Stream(), Stream()))
+    assert calls == [
+        {"encoding": "utf-8", "errors": "strict"},
+        {"encoding": "utf-8", "errors": "strict"},
+        {"encoding": "utf-8", "errors": "strict"},
+    ]

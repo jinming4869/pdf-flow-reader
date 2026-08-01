@@ -35,6 +35,14 @@ LANGUAGE_ALIASES = {
 }
 
 
+def configure_utf8_stdio(streams: tuple[Any, ...] | None = None) -> None:
+    """Keep the NDJSON protocol UTF-8 even on Windows legacy code pages."""
+    for stream in streams or (sys.stdin, sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="strict")
+
+
 def normalize_language(language: object) -> str:
     normalized = str(language or "").strip().lower().replace("_", "-")
     try:
@@ -260,6 +268,7 @@ def serialized_error(exc: Exception) -> dict[str, str | None]:
 
 
 def run() -> int:
+    configure_utf8_stdio()
     models_dir = os.environ.get("PDF_FLOW_TTS_MODELS_DIR", "").strip()
     if not models_dir:
         raise RuntimeError("PDF_FLOW_TTS_MODELS_DIR is required")

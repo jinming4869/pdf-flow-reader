@@ -15,6 +15,11 @@ export function createTextSegment({
   bbox = null,
   source = "native-text",
   confidence = 1,
+  paragraphId = null,
+  blockId = null,
+  hasEOL = false,
+  fontName = null,
+  direction = null,
 } = {}) {
   const cleanText = typeof text === "string" ? text.trim() : "";
   const safeBbox = bbox && typeof bbox === "object"
@@ -37,6 +42,13 @@ export function createTextSegment({
     yEnd: safeBbox ? safeBbox.y + safeBbox.height : null,
     source,
     confidence: Math.max(0, Math.min(1, Number(confidence) || 0)),
+    paragraphId: paragraphId === null || paragraphId === undefined
+      ? null
+      : String(paragraphId),
+    blockId: blockId === null || blockId === undefined ? null : String(blockId),
+    hasEOL: Boolean(hasEOL),
+    fontName: typeof fontName === "string" && fontName ? fontName : null,
+    direction: typeof direction === "string" && direction ? direction : null,
   };
 }
 
@@ -45,6 +57,7 @@ export function segmentsFromPdfTextContent({
   pageIndex,
   textContent,
   source = "native-text",
+  viewport = null,
 } = {}) {
   const items = Array.isArray(textContent?.items) ? textContent.items : [];
   const segments = [];
@@ -57,14 +70,35 @@ export function segmentsFromPdfTextContent({
     const y = Number(transform[5]) || 0;
     const width = Number(item.width) || 0;
     const height = Number(item.height) || Math.abs(Number(transform[3]) || 0);
+    let bbox = { x, y, width, height };
+    if (typeof viewport?.convertToViewportRectangle === "function") {
+      const rectangle = viewport.convertToViewportRectangle([
+        x,
+        y,
+        x + width,
+        y + height,
+      ]);
+      if (Array.isArray(rectangle) && rectangle.length >= 4) {
+        const [x0, y0, x1, y1] = rectangle.map((value) => Number(value) || 0);
+        bbox = {
+          x: Math.min(x0, x1),
+          y: Math.min(y0, y1),
+          width: Math.abs(x1 - x0),
+          height: Math.abs(y1 - y0),
+        };
+      }
+    }
     segments.push(createTextSegment({
       documentId,
       pageIndex,
       segmentIndex: segments.length,
       text,
-      bbox: { x, y, width, height },
+      bbox,
       source,
       confidence: 1,
+      hasEOL: item?.hasEOL,
+      fontName: item?.fontName,
+      direction: item?.dir,
     }));
   }
 

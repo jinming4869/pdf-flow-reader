@@ -33,6 +33,32 @@ test("default preferences keep subtle sound cues enabled", () => {
   const state = createEmptyState(new Date("2026-07-24T00:00:00Z"));
   assert.equal(state.preferences.soundCueEnabled, true);
   assert.equal(state.preferences.rhythmPatternMode, "soft");
+  assert.equal(state.preferences.ttsEnabled, false);
+});
+
+test("stored three-state TTS preferences migrate to one boolean master", () => {
+  const storage = new MemoryStorage();
+  storage.setItem(storageKey, JSON.stringify({
+    preferences: {
+      ttsMode: "flow",
+      ttsVolume: 0.5,
+      ttsConsentGiven: true,
+    },
+  }));
+  const migrated = readLocalState(storage);
+  assert.equal(migrated.preferences.ttsEnabled, true);
+  assert.equal(migrated.preferences.openaiTtsConsentGiven, true);
+  assert.equal("ttsMode" in migrated.preferences, false);
+  assert.equal("ttsPreferredMode" in migrated.preferences, false);
+  assert.equal("ttsConsentGiven" in migrated.preferences, false);
+
+  writeLocalState(migrated, storage);
+  const persisted = JSON.parse(storage.getItem(storageKey));
+  assert.equal(persisted.preferences.ttsEnabled, true);
+  assert.equal(persisted.preferences.openaiTtsConsentGiven, true);
+  assert.equal("ttsMode" in persisted.preferences, false);
+  assert.equal("ttsPreferredMode" in persisted.preferences, false);
+  assert.equal("ttsConsentGiven" in persisted.preferences, false);
 });
 
 test("createDocumentFingerprint is stable for the same local file metadata", () => {

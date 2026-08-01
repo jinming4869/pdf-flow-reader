@@ -1,9 +1,57 @@
 const OCR_LANGUAGES = ["chi_sim", "chi_tra", "eng", "jpn"];
-const PRIMARY_LANGUAGE_SET = "chi_sim+eng+jpn";
-const TRADITIONAL_LANGUAGE_SET = "chi_tra+eng+jpn";
-const OCR_TARGET_WIDTH = 1_420;
-const OCR_MAX_SCALE = 2.2;
+const DETECTION_LANGUAGE_SET = "chi_sim+eng+jpn";
+const SIMPLIFIED_LANGUAGE_SET = "chi_sim+eng";
+const TRADITIONAL_LANGUAGE_SET = "chi_tra+eng";
+// Japanese study material often mixes kana with kanji vocabulary and Chinese
+// explanations. Keep Japanese first so its punctuation and spacing model wins,
+// while retaining simplified Chinese as a helper for mixed textbook pages.
+const JAPANESE_LANGUAGE_SET = "jpn+chi_sim+eng";
+const ENGLISH_LANGUAGE_SET = "eng";
+const OCR_TARGET_WIDTH = 1_600;
+const OCR_MAX_SCALE = 3.2;
 const TRADITIONAL_HINT = /[萬與專業東絲兩嚴個豐臨為麗舉麼義烏樂喬習鄉書買亂爭於雲亞產親億僅從儀們價眾優會傳傷倫體國語閱讀跡]/u;
+
+function scriptCount(text = "", pattern) {
+  return [...String(text).matchAll(pattern)].length;
+}
+
+export function ocrLanguageSetForText(text = "", {
+  fallback = DETECTION_LANGUAGE_SET,
+} = {}) {
+  const source = String(text);
+  const kana = scriptCount(source, /[\p{Script=Hiragana}\p{Script=Katakana}]/gu);
+  const han = scriptCount(source, /\p{Script=Han}/gu);
+  const latin = scriptCount(source, /\p{Script=Latin}/gu);
+  if (kana >= 6 && kana >= Math.max(6, han * 0.04)) return JAPANESE_LANGUAGE_SET;
+  if (TRADITIONAL_HINT.test(source)) return TRADITIONAL_LANGUAGE_SET;
+  if (han >= 8) return SIMPLIFIED_LANGUAGE_SET;
+  if (latin >= 24) return ENGLISH_LANGUAGE_SET;
+  return fallback;
+}
+
+export function ocrLanguageSetForDocumentLabel(label = "") {
+  const source = String(label);
+  if (
+    /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(source) ||
+    /(?:日本語|日语|日語|japanese)/iu.test(source)
+  ) {
+    return JAPANESE_LANGUAGE_SET;
+  }
+  if (TRADITIONAL_HINT.test(source)) return TRADITIONAL_LANGUAGE_SET;
+  const han = scriptCount(source, /\p{Script=Han}/gu);
+  const latin = scriptCount(source, /\p{Script=Latin}/gu);
+  if (han === 0 && latin >= 12) return ENGLISH_LANGUAGE_SET;
+  return null;
+}
+
+export function ocrRenderScaleForWidth(width) {
+  const pageWidth = Number(width);
+  if (!Number.isFinite(pageWidth) || pageWidth <= 0) return 1.5;
+  return Math.min(
+    OCR_MAX_SCALE,
+    Math.max(1.5, OCR_TARGET_WIDTH / pageWidth),
+  );
+}
 
 function abortError() {
   return new DOMException("识别已取消", "AbortError");
@@ -39,10 +87,7 @@ async function renderPageForOcr(pdf, pageNumber, signal) {
   throwIfAborted(signal);
 
   const baseViewport = page.getViewport({ scale: 1 });
-  const scale = Math.min(
-    OCR_MAX_SCALE,
-    Math.max(1.35, OCR_TARGET_WIDTH / baseViewport.width),
-  );
+  const scale = ocrRenderScaleForWidth(baseViewport.width);
   const viewport = page.getViewport({ scale });
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d", { alpha: false });
@@ -88,7 +133,8 @@ export function createLocalOcrProvider({ onProgress } = {}) {
   let worker = null;
   let workerPromise = null;
   let lifecycle = 0;
-  let activeLanguageSet = PRIMARY_LANGUAGE_SET;
+  let activeLanguageSet = DETECTION_LANGUAGE_SET;
+  let documentLanguageSets = new WeakMap();
 
   async function ensureWorker(signal) {
     throwIfAborted(signal);
@@ -98,7 +144,7 @@ export function createLocalOcrProvider({ onProgress } = {}) {
         const module = await import("./vendor/tesseract/tesseract.esm.min.js");
         const Tesseract = module.default;
         const createdWorker = await Tesseract.createWorker(
-          PRIMARY_LANGUAGE_SET,
+          DETECTION_LANGUAGE_SET,
           Tesseract.OEM.LSTM_ONLY,
           {
             workerPath: new URL(
@@ -137,15 +183,17 @@ export function createLocalOcrProvider({ onProgress } = {}) {
     return activeWorker;
   }
 
-  async function recognizePage({ pdf, pageNumber, signal }) {
+  async function recognizePage({ pdf, pageNumber, signal, documentLabel = "" }) {
     const activeWorker = await ensureWorker(signal);
     const nativeText = await nativePageText(pdf, pageNumber, signal);
     const nativeHasText = nativeText.replace(/\s/gu, "").length >= 12;
-    const preferredLanguageSet = nativeHasText
-      ? TRADITIONAL_HINT.test(nativeText)
-        ? TRADITIONAL_LANGUAGE_SET
-        : PRIMARY_LANGUAGE_SET
-      : activeLanguageSet;
+    const learnedLanguageSet = documentLanguageSets.get(pdf) ?? null;
+    const labelLanguageSet = ocrLanguageSetForDocumentLabel(documentLabel);
+    const preferredLanguageSet = labelLanguageSet ?? (nativeHasText
+      ? ocrLanguageSetForText(nativeText, {
+          fallback: learnedLanguageSet ?? DETECTION_LANGUAGE_SET,
+        })
+      : learnedLanguageSet ?? activeLanguageSet);
 
     if (preferredLanguageSet !== activeLanguageSet) {
       await withAbort(
@@ -159,21 +207,40 @@ export function createLocalOcrProvider({ onProgress } = {}) {
 
     try {
       throwIfAborted(signal);
-      let result = await withAbort(activeWorker.recognize(canvas), signal);
-      if (
-        !nativeHasText &&
-        activeLanguageSet === PRIMARY_LANGUAGE_SET &&
-        TRADITIONAL_HINT.test(result.data.text)
-      ) {
+      let result = await withAbort(
+        activeWorker.recognize(canvas, {}, { text: true, blocks: true }),
+        signal,
+      );
+      const detectedLanguageSet = labelLanguageSet ?? ocrLanguageSetForText(
+          nativeHasText ? nativeText : result.data.text,
+          { fallback: activeLanguageSet },
+        );
+      if (detectedLanguageSet !== activeLanguageSet) {
         await withAbort(
-          activeWorker.reinitialize(TRADITIONAL_LANGUAGE_SET),
+          activeWorker.reinitialize(detectedLanguageSet),
           signal,
         );
-        activeLanguageSet = TRADITIONAL_LANGUAGE_SET;
-        result = await withAbort(activeWorker.recognize(canvas), signal);
+        activeLanguageSet = detectedLanguageSet;
+        result = await withAbort(
+          activeWorker.recognize(canvas, {}, { text: true, blocks: true }),
+          signal,
+        );
       }
+      documentLanguageSets.set(pdf, activeLanguageSet);
       throwIfAborted(signal);
-      return result.data.text;
+      return {
+        text: result.data.text,
+        source: "ocr",
+        pageNumber,
+        languageSet: activeLanguageSet,
+        pageDimensions: {
+          width: canvas.width,
+          height: canvas.height,
+        },
+        blocks: Array.isArray(result.data.blocks) ? result.data.blocks : [],
+        words: Array.isArray(result.data.words) ? result.data.words : [],
+        lines: Array.isArray(result.data.lines) ? result.data.lines : [],
+      };
     } finally {
       canvas.width = 1;
       canvas.height = 1;
@@ -185,7 +252,8 @@ export function createLocalOcrProvider({ onProgress } = {}) {
     const activeWorker = worker;
     worker = null;
     workerPromise = null;
-    activeLanguageSet = PRIMARY_LANGUAGE_SET;
+    activeLanguageSet = DETECTION_LANGUAGE_SET;
+    documentLanguageSets = new WeakMap();
     if (activeWorker) await activeWorker.terminate();
   }
 

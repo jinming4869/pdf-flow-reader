@@ -1,5 +1,13 @@
 import * as pdfjsLib from "./vendor/pdf.mjs";
 import { createLocalOcrProvider } from "./ocr-provider.mjs";
+import {
+  continuousOcrAheadPage,
+  createOcrTaskScheduler,
+} from "./ocr-schedule.mjs";
+import {
+  pointSegmentPreferenceForOcrLanguageSet,
+  segmentsFromOcrResult,
+} from "./ocr-segment-adapter.mjs";
 import { createFilePdfSource } from "./pdf-source.mjs";
 import {
   captureReadingAnchor,
@@ -16,8 +24,57 @@ import {
   speedTier,
   unitsPerMinute,
 } from "./reading-model.mjs";
+import { createReadingClockSnapshot } from "./reading-clock.mjs";
 import { createRhythmSnapshot } from "./reading-rhythm.mjs";
+import { segmentsToReadableChunks } from "./readable-chunk.mjs";
 import { createSpeedCueEngine } from "./sound-engine.mjs";
+import { segmentsFromPdfTextContent } from "./text-segment.mjs";
+import {
+  assessmentSupportsDensity,
+  assessTextQuality,
+  resolveTextSourceState,
+  selectReadableChunks,
+} from "./text-source-state.mjs";
+import { createTtsAudioPlayer } from "./tts-audio-player.mjs";
+import {
+  canRequestManualSpeech,
+  cancelTtsSession,
+  createTtsController,
+  runManualSpeechRequest,
+} from "./tts-controller.mjs";
+import {
+  normalizeTtsPreferences,
+  ttsProviderConfigFromPreferences,
+  updateTtsPreferences,
+} from "./tts-preferences.mjs";
+import {
+  shouldCancelPolicyTransition,
+  shouldPreserveContinuousSpeechOnPageChange,
+} from "./tts-policy.mjs";
+import { pickTtsProvider } from "./tts-provider.mjs";
+import { createTtsScheduler } from "./tts-scheduler.mjs";
+import {
+  advanceParagraphFlowContext,
+  isLargeParagraphReadingJump,
+  linkCrossPageParagraphs,
+  materializeParagraphBoundaries,
+  segmentsToParagraphPassages,
+  shouldPreserveParagraphFlowOnPageChange,
+} from "./tts-paragraph-flow.mjs";
+import {
+  pickReadableChunk,
+  pickReadableSentenceBelowLine,
+  previewPickedChunk,
+} from "./tts-segment-picker.mjs";
+import {
+  shouldActivatePointReadGesture,
+  shouldRenderPointReadHover,
+} from "./tts-point-gesture.mjs";
+import {
+  createPointSentenceTargets,
+  pickPointSentence,
+} from "./tts-point-sentence.mjs";
+import { createPointReadSession } from "./tts-point-session.mjs";
 import {
   clearLocalState,
   createDocumentFingerprint,
@@ -69,8 +126,14 @@ const elements = {
   englishRate: document.querySelector("#englishRate"),
   rhythmInsight: document.querySelector("#rhythmInsight"),
   densityHint: document.querySelector("#densityHint"),
+  ttsPointReadButton: document.querySelector("#ttsPointReadButton"),
+  ttsPointReadStatus: document.querySelector("#ttsPointReadStatus"),
   topReadingTime: document.querySelector("#topReadingTime"),
   speedParticles: document.querySelector("#speedParticles"),
+  ttsControls: document.querySelector(".tts-controls"),
+  ttsModeButton: document.querySelector("#ttsModeButton"),
+  ttsManualReadButton: document.querySelector("#ttsManualReadButton"),
+  ttsStatus: document.querySelector("#ttsStatus"),
   pageStatus: document.querySelector("#pageStatus"),
   progressBar: document.querySelector("#progressBar"),
   finish: document.querySelector("#finish"),
@@ -78,6 +141,10 @@ const elements = {
   ocrDock: document.querySelector("#ocrDock"),
   ocrButton: document.querySelector("#ocrButton"),
   ocrStatus: document.querySelector("#ocrStatus"),
+  ttsDiagnosticsPanel: document.querySelector("#ttsDiagnosticsPanel"),
+  ttsDiagnosticsOutput: document.querySelector("#ttsDiagnosticsOutput"),
+  ttsDiagnosticsClose: document.querySelector("#ttsDiagnosticsClose"),
+  ttsDiagnosticsSelfTest: document.querySelector("#ttsDiagnosticsSelfTest"),
   errorPanel: document.querySelector("#errorPanel"),
   errorText: document.querySelector("#errorText"),
 };
@@ -88,6 +155,7 @@ const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const numberFormat = new Intl.NumberFormat("zh-CN");
 
 let localState = readLocalState();
+localState = updateTtsPreferences(localState, normalizeTtsPreferences(localState.preferences));
 let activePdf = null;
 let activeLoadingTask = null;
 let activeFileTransport = null;
@@ -125,15 +193,28 @@ let firstPageMessageTimer = 0;
 let resizeTimer = 0;
 let pageTextCache = new Map();
 let pageTextRequests = new Map();
+let pageReadableChunkCache = new Map();
+let pageParagraphPassageCache = new Map();
+let pagePointSentenceCache = new Map();
 let ocrTextCache = new Map();
+let ocrReadableChunkCache = new Map();
+let ocrParagraphPassageCache = new Map();
+let ocrPointSentenceCache = new Map();
+let paragraphPassageRevisions = new Map();
+let paragraphFlowContextState = null;
+let ttsParagraphJumpPending = false;
+let nativeTextAssessments = new Map();
+let ocrTextAssessments = new Map();
+let pageTextSourceStates = new Map();
+let ocrTaskByPage = new Map();
+let ocrFailureByPage = new Map();
 let ocrProvider = null;
 let ocrAbortController = null;
-let ocrEnabled = false;
-let ocrFailed = false;
+let ocrWorkloadActive = false;
+let ocrLastError = null;
 let ocrScanRequest = 0;
 let ocrRunChain = Promise.resolve();
 let ocrProgressPosition = null;
-let ocrScheduleTimer = 0;
 let diagnosticsSession = {
   startedAt: performance.now(),
   metadataReadyMs: null,
@@ -145,14 +226,108 @@ let activeFileMeta = null;
 let pendingResumeRecord = null;
 let persistTimer = 0;
 let restoreMessageTimer = 0;
+const ttsProvider = pickTtsProvider(ttsProviderConfigFromPreferences(localState.preferences));
+let ttsWarmupPromise = null;
+let ttsWarmupStatus = "idle";
+let ttsUtteranceLocked = false;
+let ttsRuntimeActivationPromise = null;
+let activeTtsTierKey = speedTier(speed).themeKey;
+const pointReadSession = createPointReadSession();
+let pointReadScrollHold = false;
+let pointReadGesture = null;
+
 const speedCueEngine = createSpeedCueEngine({
   getVolume: () => localState.preferences.soundCueVolume,
   getPatternMode: () => localState.preferences.rhythmPatternMode,
   getSampleUrl: (step) => `./build/sound-cues/${step.direction}-${step.boundaryIndex + 1}.m4a`,
 });
+const ttsAudioPlayer = createTtsAudioPlayer({
+  volume: localState.preferences.ttsVolume,
+  muted: localState.preferences.ttsMuted,
+  onStateChange: (state) => {
+    if (state?.ended) {
+      ttsUtteranceLocked = false;
+      ttsScheduler.releasePlaybackLock("playback-ended");
+      settlePointReadPlayback("ended");
+      if (playing) updateTtsSchedulerDiagnostics(activeReadingPage || currentPageNumber());
+    }
+    publishDiagnostics();
+  },
+});
+const ttsScheduler = createTtsScheduler({
+  provider: ttsProvider,
+  onPick: ({ pick }) => {
+    ttsUtteranceLocked = true;
+    if (pick?.chunk?.pointReadRequestId) {
+      pointReadSession.markPhase(pick.chunk.pointReadRequestId, "synthesizing");
+      renderPointReadHighlight(pick.chunk, { phase: "queued" });
+    } else {
+      renderTtsFocus(pick, { phase: "queued" });
+    }
+    refreshTtsRuntimeStatus();
+  },
+  onResult: ({ result, pick }) => {
+    const pointToken = pick?.chunk?.pointReadRequestId ?? null;
+    if (pointToken) {
+      pointReadSession.markPhase(pointToken, "playing");
+      renderPointReadHighlight(pick.chunk, { phase: "speaking" });
+    } else {
+      renderTtsFocus(pick, { phase: "speaking" });
+    }
+    void ttsAudioPlayer.play(result)
+      .then((source) => {
+        if (!source) {
+          ttsUtteranceLocked = false;
+          ttsScheduler.releasePlaybackLock("playback-skipped");
+          if (pointToken) settlePointReadPlayback("failed", pointToken);
+        }
+      })
+      .catch(() => {
+        ttsUtteranceLocked = false;
+        ttsScheduler.releasePlaybackLock("playback-failed");
+        if (pointToken) settlePointReadPlayback("failed", pointToken);
+      })
+      .finally(() => {
+        refreshTtsRuntimeStatus();
+        publishDiagnostics();
+      });
+  },
+});
+const ttsController = createTtsController({
+  scheduler: ttsScheduler,
+  getSpeedTier: () => speedTier(speed).themeKey,
+  onStateChange: updateTtsUi,
+});
+ttsController.setEnabled(localState.preferences.ttsEnabled);
+
+const ocrTaskScheduler = createOcrTaskScheduler({
+  delayMs: 180,
+  setTimeoutFn: (callback, delay) => window.setTimeout(callback, delay),
+  clearTimeoutFn: (timerId) => window.clearTimeout(timerId),
+  onReady: ({ centerPage, priorityPage, generation, request }) => {
+    if (
+      !ocrWorkloadActive ||
+      request !== ocrScanRequest ||
+      generation !== loadGeneration
+    ) {
+      return null;
+    }
+    ocrRunChain = ocrRunChain
+      .catch(() => {})
+      .then(() => runNearbyOcr(
+        centerPage,
+        generation,
+        request,
+        priorityPage,
+      ));
+    return ocrRunChain;
+  },
+});
 
 function emptyRenderSnapshot() {
-  const budget = cacheBudgetForDeviceMemory(deviceMemoryGb, { ocrEnabled });
+  const budget = cacheBudgetForDeviceMemory(deviceMemoryGb, {
+    ocrEnabled: ocrWorkloadActive,
+  });
   return {
     timing: {
       elapsedMs: Math.round(performance.now() - diagnosticsSession.startedAt),
@@ -196,13 +371,142 @@ function collectDiagnosticsSnapshot() {
         }
       : null,
     ocr: {
-      enabled: ocrEnabled,
+      workloadActive: ocrWorkloadActive,
       running: Boolean(ocrAbortController),
       cachedPages: ocrTextCache.size,
-      failed: ocrFailed,
+      lastError: ocrLastError,
+      taskPages: [...ocrTaskByPage.keys()],
+      failedPages: [...ocrFailureByPage.keys()],
+      currentPageState: activeReadingPage
+        ? textSourceStateForPage(activeReadingPage)
+        : null,
+      currentPageNativeAssessment: activeReadingPage
+        ? nativeTextAssessments.get(activeReadingPage) ?? null
+        : null,
+      currentPageOcrAssessment: activeReadingPage
+        ? ocrTextAssessments.get(activeReadingPage) ?? null
+        : null,
+    },
+    readableChunks: collectReadableChunkDiagnostics(),
+    tts: {
+      controller: ttsController.snapshot(),
+      scheduler: ttsScheduler.snapshot(),
+      audio: ttsAudioPlayer.snapshot(),
+      utteranceLocked: ttsUtteranceLocked,
     },
   };
 }
+
+function collectTtsChainDiagnostics() {
+  const page = activeReadingPage || currentPageNumber();
+  const chunks = page ? readableChunksForPage(page) : [];
+  const normalizedReadingY = page ? normalizedReadingLineForPage(page) : null;
+  const currentPick = page
+    ? pickReadableChunk(chunks, { normalizedReadingY: normalizedReadingY ?? 0.38 })
+    : null;
+  return {
+    ui: {
+      readyToMove,
+      playing,
+      controlsHidden: Boolean(elements.ttsControls?.hidden),
+      controlAllowed: isTtsControlAllowed(),
+      tier: speedTier(speed).themeKey,
+      ttsTierEnabled: isTtsTierEnabled(),
+      warmupStatus: ttsWarmupStatus,
+      utteranceLocked: ttsUtteranceLocked,
+      lineVisible: Boolean(document.querySelector(".tts-focus")),
+      modeButtonText: elements.ttsModeButton?.textContent ?? null,
+      statusText: elements.ttsStatus?.textContent ?? null,
+    },
+    ocr: {
+      workloadActive: ocrWorkloadActive,
+      running: Boolean(ocrAbortController),
+      lastError: ocrLastError,
+      cachedPages: ocrReadableChunkCache.size,
+      currentPageHasOcrText: page ? ocrTextCache.has(page) : false,
+      currentPageHasOcrChunks: page ? (ocrReadableChunkCache.get(page)?.length ?? 0) > 0 : false,
+      currentPageState: page ? textSourceStateForPage(page) : null,
+      currentPageNativeAssessment: page
+        ? nativeTextAssessments.get(page) ?? null
+        : null,
+      currentPageOcrAssessment: page
+        ? ocrTextAssessments.get(page) ?? null
+        : null,
+    },
+    page: {
+      page,
+      normalizedReadingY,
+      chunkCount: chunks.length,
+      currentPick: previewPickedChunk(currentPick),
+    },
+    controller: ttsController.snapshot(),
+    scheduler: ttsScheduler.snapshot(),
+    audio: ttsAudioPlayer.snapshot(),
+  };
+}
+
+function updateTtsDiagnosticsPanel(extra = null) {
+  if (!elements.ttsDiagnosticsOutput) return;
+  const snapshot = collectTtsChainDiagnostics();
+  elements.ttsDiagnosticsOutput.textContent = JSON.stringify(extra ? { ...snapshot, selfTest: extra } : snapshot, null, 2);
+}
+
+async function runTtsSelfTest() {
+  const startedAt = performance.now();
+  const result = {
+    ok: false,
+    stage: "start",
+    elapsedMs: 0,
+    bytes: 0,
+    contentType: null,
+    error: null,
+  };
+  try {
+    result.stage = "fetch ./tts/kokoro";
+    const response = await fetch("./tts/kokoro", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "希声诊断", language: "zh", voice: "zf_xiaobei", speed: 1.2 }),
+    });
+    result.status = response.status;
+    result.contentType = response.headers.get("Content-Type");
+    result.provider = response.headers.get("X-TTS-Provider");
+    result.language = response.headers.get("X-TTS-Language");
+    result.voice = response.headers.get("X-TTS-Voice");
+    result.model = response.headers.get("X-TTS-Model");
+    result.speed = response.headers.get("X-TTS-Speed");
+    if (!response.ok) throw new Error(await response.text());
+    const buffer = await response.arrayBuffer();
+    result.bytes = buffer.byteLength;
+    result.stage = "decode";
+    const ctx = new (globalThis.AudioContext || globalThis.webkitAudioContext)();
+    const decoded = await ctx.decodeAudioData(buffer.slice(0));
+    result.duration = decoded.duration;
+    await ctx.close?.();
+    result.ok = buffer.byteLength > 44 && decoded.duration > 0;
+    result.stage = "done";
+  } catch (error) {
+    result.error = error instanceof Error ? error.message : String(error);
+  } finally {
+    result.elapsedMs = Math.round(performance.now() - startedAt);
+    updateTtsDiagnosticsPanel(result);
+  }
+  return result;
+}
+
+function toggleTtsDiagnosticsPanel(force = undefined) {
+  if (!elements.ttsDiagnosticsPanel) return;
+  const nextHidden = force === undefined ? !elements.ttsDiagnosticsPanel.hidden : !force;
+  elements.ttsDiagnosticsPanel.hidden = nextHidden;
+  if (!nextHidden) updateTtsDiagnosticsPanel();
+}
+
+window.pdfFlowReaderTtsDiagnostics = Object.freeze({
+  snapshot: collectTtsChainDiagnostics,
+  selfTest: runTtsSelfTest,
+  show: () => toggleTtsDiagnosticsPanel(true),
+  hide: () => toggleTtsDiagnosticsPanel(false),
+});
 
 function publishDiagnostics() {
   let output = document.querySelector("#performanceDiagnostics");
@@ -319,6 +623,670 @@ function applyPatternMode(mode = localState.preferences.rhythmPatternMode) {
   document.documentElement.dataset.patternMode = nextMode;
 }
 
+function currentTtsPolicy() {
+  return ttsController.getPolicy();
+}
+
+function ttsMasterHelp(snapshot = ttsController.snapshot()) {
+  return snapshot.enabled
+    ? snapshot.behavior
+    : "希声静默；按 H 或按钮开启";
+}
+
+function isPointReadPolicy(policy = currentTtsPolicy()) {
+  return Boolean(policy?.controls?.pointReadControlVisible);
+}
+
+function setTtsStatusText(text = "") {
+  if (elements.ttsStatus) elements.ttsStatus.textContent = text;
+  if (elements.ttsPointReadStatus) {
+    elements.ttsPointReadStatus.textContent = text;
+    elements.ttsPointReadStatus.title = text;
+    const passive = (
+      text.startsWith("希声静默") ||
+      text.startsWith("点句朗读开启后") ||
+      text.startsWith("点击 PDF 中的完整句子")
+    );
+    elements.ttsPointReadStatus.hidden = !isPointReadPolicy() || !text || passive;
+  }
+}
+
+function ttsTextWaitHelp(pageNumber = activeReadingPage || currentPageNumber()) {
+  const sourceState = textSourceStateForPage(pageNumber);
+  if (sourceState.state === "checking-native") return "正在检查当前页的原生文字";
+  if (sourceState.state === "ocr-scheduled") return "扫描已排队，稍后会辨认附近页";
+  if (sourceState.state === "ocr-running") return "正在从扫描页中辨认可朗读文字";
+  if (sourceState.state === "ocr-failed") return "扫描未完成，可在页面边缘点按重试";
+  if (sourceState.state === "ocr-poor") return "扫描完成，但本页仍没有足够的可朗读文字";
+  return "当前页还没有可朗读文字";
+}
+
+function isTtsTierEnabled() {
+  const policy = currentTtsPolicy();
+  return Boolean(policy.enabled && isTtsTierImplemented(policy));
+}
+
+function isTtsTierImplemented(policy = currentTtsPolicy()) {
+  return [
+    "snow-mist",
+    "aesthetic-walk",
+    "long-day",
+    "winding-stream",
+    "strong-wind",
+    "all-things-flourish",
+  ].includes(policy.tierKey);
+}
+
+function isTtsControlAllowed() {
+  return Boolean(readyToMove && activePdf);
+}
+
+function currentPageHasLineSpeechTarget() {
+  const pageNumber = activeReadingPage || currentPageNumber();
+  if (!pageNumber) return false;
+  return Boolean(pickReadableSentenceBelowLine(
+    readableChunksForPage(pageNumber),
+    { normalizedReadingY: normalizedReadingLineForPage(pageNumber) },
+  ));
+}
+
+function updateManualReadControl() {
+  if (!elements.ttsManualReadButton) return;
+  const policy = currentTtsPolicy();
+  const visible = Boolean(
+    isTtsControlAllowed() &&
+    policy.enabled &&
+    policy.manual.action === "read-line-sentence"
+  );
+  elements.ttsManualReadButton.hidden = !visible;
+  elements.ttsManualReadButton.disabled = !visible || !currentPageHasLineSpeechTarget();
+}
+
+function ensureTtsRuntimeActive(reason = "tts-visible") {
+  if (!isTtsControlAllowed() || !ttsController.isEnabled() || !isTtsTierEnabled()) {
+    return;
+  }
+  ttsAudioPlayer.setMuted(false);
+  localState = updateTtsPreferences(localState, { ttsMuted: false });
+  writeLocalState(localState);
+  renderTtsReadingLine(activeReadingPage || currentPageNumber(), { phase: "tracking" });
+  if (ttsRuntimeActivationPromise) return;
+  const context = {
+    controllerGeneration: ttsController.getGeneration(),
+    tierKey: currentTtsPolicy().tierKey,
+  };
+  const contextIsCurrent = () => Boolean(
+    ttsController.isEnabled() &&
+    isTtsTierEnabled() &&
+    ttsController.getGeneration() === context.controllerGeneration &&
+    currentTtsPolicy().tierKey === context.tierKey
+  );
+  ttsRuntimeActivationPromise = Promise.resolve()
+    .then(async () => {
+      let ready = await warmupTtsProvider();
+      if (ready !== true && contextIsCurrent()) {
+        ready = await warmupTtsProvider();
+      }
+      if (ready !== true || !contextIsCurrent()) return false;
+      renderTtsReadingLine(activeReadingPage || currentPageNumber(), { phase: "tracking" });
+      updateTtsSchedulerDiagnostics(activeReadingPage || currentPageNumber());
+      return true;
+    })
+    .catch(() => {})
+    .finally(() => {
+      const contextChanged = !contextIsCurrent();
+      ttsRuntimeActivationPromise = null;
+      refreshTtsRuntimeStatus();
+      publishDiagnostics();
+      if (
+        contextChanged &&
+        ttsController.isEnabled() &&
+        isTtsTierEnabled()
+      ) {
+        ensureTtsRuntimeActive("warmup-context-changed");
+      }
+    });
+}
+
+function syncTtsControlVisibility() {
+  if (!elements.ttsControls || !elements.ttsPointReadButton) return;
+  const allowed = isTtsControlAllowed();
+  const pointReadVisible = Boolean(
+    allowed && isPointReadPolicy()
+  );
+  elements.ttsControls.hidden = !allowed || pointReadVisible;
+  elements.ttsPointReadButton.hidden = !pointReadVisible;
+  if (!pointReadVisible) elements.ttsPointReadStatus.hidden = true;
+  const implemented = isTtsTierImplemented();
+  elements.ttsModeButton.disabled = Boolean(!implemented && !ttsController.isEnabled());
+  updateManualReadControl();
+  syncPointReadSurfaces();
+  if (allowed) ensureTtsRuntimeActive("tts-control-visible");
+}
+
+function pointReadIsActive() {
+  return Boolean(pointReadSession.snapshot().active || pointReadScrollHold);
+}
+
+function setPointReadBusy(phase = null) {
+  if (!elements.ttsPointReadButton) return;
+  const busy = ["warming", "synthesizing", "playing"].includes(phase);
+  elements.ttsPointReadButton.setAttribute("aria-busy", String(busy));
+}
+
+function cancelPointReadInteraction(reason = "cancelled", { pauseScroll = true } = {}) {
+  const wasActive = pointReadIsActive();
+  pointReadSession.cancel(reason);
+  pointReadScrollHold = false;
+  pointReadGesture = null;
+  clearPointReadHighlight();
+  setPointReadBusy(null);
+  if (wasActive && pauseScroll && playing) {
+    setPlaying(false, { cancelSpeech: false });
+  }
+  return wasActive;
+}
+
+function settlePointReadPlayback(outcome = "ended", token = null) {
+  const current = pointReadSession.snapshot();
+  const activeToken = token ?? current.token ?? null;
+  if (!activeToken) return false;
+  const settled = pointReadSession.settle(activeToken, { outcome });
+  if (!settled.accepted) return false;
+  pointReadScrollHold = false;
+  clearPointReadHighlight();
+  setPointReadBusy(null);
+  if (settled.shouldResume && Number.isFinite(settled.resumeSpeed)) {
+    speed = settled.resumeSpeed;
+    elements.speed.value = String(speed);
+    updateSpeedPresentation("initial");
+  }
+  refreshTtsRuntimeStatus();
+  return true;
+}
+
+function cancelSpeechSession(reason = "cancelled", options = {}) {
+  if (!options.preservePointRequest) {
+    cancelPointReadInteraction(reason, {
+      pauseScroll: options.pausePointScroll !== false,
+    });
+  }
+  cancelTtsSession({
+    controller: ttsController,
+    scheduler: ttsScheduler,
+    audioPlayer: ttsAudioPlayer,
+    clearFocus: clearTtsFocus,
+    setUtteranceLocked: (locked) => {
+      ttsUtteranceLocked = locked;
+    },
+  }, reason, options);
+  refreshTtsRuntimeStatus();
+  publishDiagnostics();
+}
+
+function enforceTtsAvailability(reason = "tts-availability") {
+  const nextTierKey = speedTier(speed).themeKey;
+  if (shouldCancelPolicyTransition({
+    enabled: ttsController.isEnabled(),
+    previousTierKey: activeTtsTierKey,
+    nextTierKey,
+  })) {
+    cancelSpeechSession("policy-changed");
+  }
+  activeTtsTierKey = nextTierKey;
+  renderTtsReadingLine(activeReadingPage || currentPageNumber(), {
+    phase: "tracking",
+  });
+  updateTtsUi(ttsController.snapshot());
+  syncTtsControlVisibility();
+}
+
+function warmupTtsProvider() {
+  if (!isTtsControlAllowed()) return Promise.resolve(false);
+  if (ttsWarmupStatus === "ready") return Promise.resolve(true);
+  if (ttsWarmupPromise) return ttsWarmupPromise;
+  ttsWarmupStatus = "loading";
+  updateTtsUi({
+    ...ttsController.snapshot(),
+    behavior: "正在预热本地语音，首次约 10–20 秒",
+  });
+  ttsWarmupPromise = Promise.resolve()
+    .then(() => ttsProvider?.preload?.())
+    .then(() => {
+      ttsWarmupStatus = "ready";
+      refreshTtsRuntimeStatus();
+      return true;
+    })
+    .catch((error) => {
+      if (error?.name === "AbortError") {
+        ttsWarmupStatus = "idle";
+        return false;
+      }
+      ttsWarmupStatus = "failed";
+      setTtsStatusText(`本地语音预热失败：${error instanceof Error ? error.message : String(error)}`);
+      throw error;
+    })
+    .finally(() => {
+      ttsWarmupPromise = null;
+      publishDiagnostics();
+    });
+  return ttsWarmupPromise;
+}
+
+function clearTtsFocus() {
+  document.querySelectorAll(".tts-focus").forEach((node) => node.remove());
+  pageShells.forEach((shell) => {
+    shell.classList.remove("has-tts-focus");
+    delete shell.dataset.ttsFocusPhase;
+  });
+}
+
+function shouldShowTtsLine() {
+  const policy = currentTtsPolicy();
+  return Boolean(
+    readyToMove &&
+    activePdf &&
+    policy.enabled &&
+    policy.readingLine.visible
+  );
+}
+
+function ensureTtsFocusElement(shell) {
+  let focus = shell.querySelector(":scope > .tts-focus");
+  if (!focus) {
+    focus = document.createElement("div");
+    focus.className = "tts-focus";
+    focus.setAttribute("aria-hidden", "true");
+    shell.append(focus);
+  }
+  return focus;
+}
+
+function renderTtsReadingLine(pageNumber = activeReadingPage, { phase = "tracking", normalizedY = null } = {}) {
+  if (!shouldShowTtsLine() || !pageNumber) {
+    clearTtsFocus();
+    return;
+  }
+  const shell = pageShells[pageNumber - 1];
+  if (!shell) return;
+  for (const otherShell of pageShells) {
+    if (otherShell !== shell) {
+      otherShell.querySelector(":scope > .tts-focus")?.remove();
+      otherShell.classList.remove("has-tts-focus");
+      delete otherShell.dataset.ttsFocusPhase;
+    }
+  }
+  const y = Math.max(0.02, Math.min(0.98, Number.isFinite(normalizedY) ? normalizedY : normalizedReadingLineForPage(pageNumber)));
+  const focus = ensureTtsFocusElement(shell);
+  focus.dataset.phase = phase;
+  focus.style.left = "0";
+  focus.style.top = `${y * 100}%`;
+  focus.style.width = "100%";
+  shell.classList.add("has-tts-focus");
+  shell.dataset.ttsFocusPhase = phase;
+}
+
+function renderTtsFocus(pick, { phase = "queued" } = {}) {
+  if (!pick?.chunk?.normalizedBbox) {
+    renderTtsReadingLine(activeReadingPage, { phase });
+    return;
+  }
+  const pageNumber = Number(pick.chunk.pageIndex ?? 0) + 1;
+  const box = pick.chunk.normalizedBbox;
+  const y = Math.max(0.02, Math.min(0.98, (Number(box.y) || 0) + (Number(box.height) || 0.03) / 2));
+  renderTtsReadingLine(pageNumber, { phase, normalizedY: y });
+}
+
+function clearPointReadHighlight() {
+  document.querySelectorAll(".point-read-highlight-layer").forEach((node) => node.remove());
+}
+
+function clearPointReadTextLayers() {
+  document.querySelectorAll(".point-read-text-layer").forEach((node) => node.remove());
+  document.documentElement.dataset.pointRead = "off";
+}
+
+function pointTargetByKey(key) {
+  if (!key) return null;
+  for (const pageNumber of nearbyPageNumbers(activeReadingPage || currentPageNumber())) {
+    const target = pointSentenceTargetsForPage(pageNumber).find((entry) => entry.key === key);
+    if (target) return target;
+  }
+  return null;
+}
+
+function renderPointReadHighlight(target, { phase = "hover" } = {}) {
+  if (!target?.fragments?.length) {
+    clearPointReadHighlight();
+    return;
+  }
+  const pageNumber = Number(target.pageIndex ?? -1) + 1;
+  const shell = pageShells[pageNumber - 1];
+  if (!shell) return;
+  clearPointReadHighlight();
+  const layer = document.createElement("div");
+  layer.className = "point-read-highlight-layer";
+  layer.dataset.phase = phase;
+  layer.dataset.targetKey = target.key;
+  layer.setAttribute("aria-hidden", "true");
+  for (const fragment of target.fragments) {
+    const box = fragment.normalizedBbox;
+    if (!box) continue;
+    const marker = document.createElement("span");
+    marker.className = "point-read-highlight-fragment";
+    marker.style.left = `${box.x * 100}%`;
+    marker.style.top = `${box.y * 100}%`;
+    marker.style.width = `${box.width * 100}%`;
+    marker.style.height = `${box.height * 100}%`;
+    layer.append(marker);
+  }
+  shell.append(layer);
+  requestAnimationFrame(() => {
+    if (layer.isConnected) layer.dataset.phase = phase;
+  });
+}
+
+function renderPointReadTextLayer(pageNumber, targets) {
+  const shell = pageShells[pageNumber - 1];
+  if (!shell) return;
+  shell.querySelector(":scope > .point-read-text-layer")?.remove();
+  if (!targets.length) return;
+  const layer = document.createElement("div");
+  layer.className = "point-read-text-layer";
+  layer.dataset.page = String(pageNumber);
+  layer.setAttribute("aria-label", `第 ${pageNumber} 页可选择文字`);
+  for (const target of targets) {
+    for (const fragment of target.fragments ?? []) {
+      const box = fragment.normalizedBbox;
+      const text = String(fragment.text ?? "");
+      if (!box || !text) continue;
+      const span = document.createElement("span");
+      span.className = "point-read-text-fragment";
+      span.dataset.pointSentenceKey = target.key;
+      span.style.left = `${box.x * 100}%`;
+      span.style.top = `${box.y * 100}%`;
+      span.style.width = `${box.width * 100}%`;
+      span.style.height = `${box.height * 100}%`;
+      span.style.fontSize = `${Math.max(7, box.height * shell.clientHeight * 0.9)}px`;
+      span.textContent = text;
+      layer.append(span);
+    }
+  }
+  shell.append(layer);
+}
+
+function syncPointReadSurfaces() {
+  const enabled = Boolean(
+    readyToMove &&
+    activePdf &&
+    ttsController.isEnabled() &&
+    isPointReadPolicy()
+  );
+  if (!enabled) {
+    clearPointReadHighlight();
+    clearPointReadTextLayers();
+    return;
+  }
+  document.documentElement.dataset.pointRead = "on";
+  const nearby = new Set(nearbyPageNumbers(activeReadingPage || currentPageNumber()));
+  for (let index = 0; index < pageShells.length; index += 1) {
+    const pageNumber = index + 1;
+    if (!nearby.has(pageNumber)) {
+      pageShells[index].querySelector(":scope > .point-read-text-layer")?.remove();
+      continue;
+    }
+    renderPointReadTextLayer(pageNumber, pointSentenceTargetsForPage(pageNumber));
+  }
+  const session = pointReadSession.snapshot();
+  const activeKey = session.targetKey ?? session.activeTargetKey ?? null;
+  if (session.active && activeKey) {
+    const target = pointTargetByKey(activeKey);
+    if (target) renderPointReadHighlight(target, { phase: session.phase ?? "queued" });
+  }
+}
+
+function updateTtsUi(state = ttsController?.snapshot?.()) {
+  if (!elements.ttsModeButton || !elements.ttsStatus || !elements.ttsPointReadButton) return;
+  const enabled = Boolean(state?.enabled ?? localState.preferences.ttsEnabled);
+  const policy = state?.policy ?? currentTtsPolicy();
+  elements.ttsModeButton.textContent = `希声：${enabled ? "开" : "关"}`;
+  elements.ttsModeButton.dataset.enabled = String(enabled);
+  elements.ttsModeButton.setAttribute("aria-pressed", String(enabled));
+  elements.ttsModeButton.title = "H：开启或关闭希声；Esc：止声";
+  elements.ttsPointReadButton.textContent = `点击以朗读：${enabled ? "开" : "关"}`;
+  elements.ttsPointReadButton.dataset.enabled = String(enabled);
+  elements.ttsPointReadButton.setAttribute("aria-pressed", String(enabled));
+  elements.ttsPointReadButton.title = "H：开启或关闭点击朗读；Esc：止声";
+  updateManualReadControl();
+  elements.ttsModeButton.disabled = false;
+  elements.ttsPointReadButton.disabled = false;
+  if (state?.status === "waiting-for-readable-chunk") {
+    setTtsStatusText(ttsTextWaitHelp());
+    return;
+  }
+  setTtsStatusText(state?.behavior ?? (
+    enabled ? policy.behavior : "希声静默；按 H 或按钮开启"
+  ));
+}
+
+function refreshTtsRuntimeStatus() {
+  if (!elements.ttsStatus) return;
+  const controller = ttsController.snapshot();
+  const scheduler = ttsScheduler.snapshot();
+  const audio = ttsAudioPlayer.snapshot();
+  if (!controller.enabled) {
+    setTtsStatusText(ttsMasterHelp(controller));
+    return;
+  }
+  if (ttsWarmupStatus === "loading") {
+    setTtsStatusText(isPointReadPolicy(controller.policy)
+      ? "正在准备本地声音，稍后即可点句"
+      : "正在预热本地语音，首次约 10–20 秒；完成后会随页面流动");
+    return;
+  }
+  if (scheduler.status === "failed") {
+    setTtsStatusText(`希声失败：${scheduler.lastResult?.error ?? "未知错误"}`);
+    return;
+  }
+  if (audio.status === "failed") {
+    setTtsStatusText(`播放失败：${audio.error ?? "无法解码音频"}`);
+    return;
+  }
+  if (scheduler.status === "waiting-for-readable-chunk") {
+    setTtsStatusText(ttsTextWaitHelp());
+    return;
+  }
+  if (scheduler.status === "queued") {
+    const speedText = scheduler.lastSpeech?.speed ? ` · ${Number(scheduler.lastSpeech.speed).toFixed(2)}x` : "";
+    setTtsStatusText(scheduler.lastSpeech?.action === "point-sentence"
+      ? `正在准备你点到的这句话${speedText}`
+      : scheduler.lastSpeech?.manual
+        ? `正在准备阅读线下方最近一句${speedText}`
+        : `正在准备跟随页面的声音${speedText}`);
+    return;
+  }
+  if (audio.status === "playing") {
+    const speedText = scheduler.lastSpeech?.speed ? ` · ${Number(scheduler.lastSpeech.speed).toFixed(2)}x` : "";
+    setTtsStatusText(scheduler.lastSpeech?.action === "point-sentence"
+      ? `正在读你点到的这句话${speedText}`
+      : `${controller.behavior}${speedText}`);
+    return;
+  }
+  if (scheduler.prefetch?.kind === "explicit") {
+    setTtsStatusText(scheduler.prefetch.ready
+      ? "下一段的首句已经备好，等阅读线越过段尾便会响起"
+      : "正在悄悄准备下一段的首句；若来不及，就让它安静过去");
+    return;
+  }
+  setTtsStatusText(controller.behavior ?? ttsMasterHelp(controller));
+}
+
+function persistTtsEnabled(enabled) {
+  localState = updateTtsPreferences(localState, {
+    ttsEnabled: enabled,
+    ttsMuted: enabled ? false : localState.preferences.ttsMuted,
+  });
+  writeLocalState(localState);
+  updateTtsUi(ttsController.snapshot());
+}
+
+function setTtsEnabled(enabled) {
+  const next = Boolean(enabled);
+  if (next && !isTtsControlAllowed()) {
+    syncTtsControlVisibility();
+    setTtsStatusText("PDF 准备好后才能开启希声");
+    return false;
+  }
+  if (!next) {
+    cancelSpeechSession("master-off");
+    ttsController.setEnabled(false);
+    persistTtsEnabled(false);
+  } else {
+    ttsController.setEnabled(true);
+    ttsAudioPlayer.setMuted(false);
+    persistTtsEnabled(true);
+    renderTtsReadingLine(activeReadingPage || currentPageNumber(), { phase: "tracking" });
+  }
+  updateOcrControls();
+  return true;
+}
+
+async function requestLineSpeech() {
+  const action = "read-line-sentence";
+  const pageNumber = activeReadingPage || currentPageNumber();
+  const allowed = () => canRequestManualSpeech({
+    readyToMove,
+    hasActivePdf: Boolean(activePdf),
+    controlAllowed: isTtsControlAllowed(),
+    policy: currentTtsPolicy(),
+    action,
+    hasReadableChunks: currentPageHasLineSpeechTarget(),
+  });
+  if (!allowed()) {
+    syncTtsControlVisibility();
+    if (elements.ttsStatus) {
+      if (!readyToMove || !activePdf) {
+        elements.ttsStatus.textContent = "PDF 准备好后才能朗读";
+      } else if (!ttsController.isEnabled()) {
+        elements.ttsStatus.textContent = "请先开启希声，再使用 R 朗读";
+      } else if (currentTtsPolicy().manual.action !== action) {
+        elements.ttsStatus.textContent = "R 只在“长日留痕”中唤起阅读线旁的一句";
+      } else if (!currentPageHasLineSpeechTarget()) {
+        elements.ttsStatus.textContent = ttsTextWaitHelp(pageNumber);
+      } else {
+        elements.ttsStatus.textContent = "当前句段暂时不可朗读";
+      }
+    }
+    return false;
+  }
+  try {
+    return await runManualSpeechRequest({
+      canRequest: allowed,
+      warmup: warmupTtsProvider,
+      requestAction: () => ttsController.requestAction(action),
+      onReady: () => {
+        ttsAudioPlayer.setMuted(false);
+        updateTtsSchedulerDiagnostics(activeReadingPage || currentPageNumber());
+      },
+    });
+  } catch {
+    refreshTtsRuntimeStatus();
+    return false;
+  }
+}
+
+async function requestPointSpeech(target) {
+  const action = "point-sentence";
+  const pageNumber = Number(target?.pageIndex ?? -1) + 1;
+  const targetIsCurrent = () => Boolean(
+    target?.key &&
+    pointSentenceTargetsForPage(pageNumber).some((entry) => entry.key === target.key)
+  );
+  const allowed = () => canRequestManualSpeech({
+    readyToMove,
+    hasActivePdf: Boolean(activePdf),
+    controlAllowed: isTtsControlAllowed(),
+    policy: currentTtsPolicy(),
+    action,
+    hasReadableChunks: targetIsCurrent(),
+  });
+  if (!allowed()) {
+    setTtsStatusText(target?.key ? "请先开启“点击以朗读”" : ttsTextWaitHelp(pageNumber));
+    return false;
+  }
+
+  const request = pointReadSession.begin({
+    targetKey: target.key,
+    wasPlaying: playing,
+    speed,
+  });
+  pointReadScrollHold = pointReadSession.snapshot().holdActive;
+  if (request.shouldPause) {
+    easedSpeed = 0;
+    scrollCarry = 0;
+  }
+  cancelSpeechSession("point-replaced", {
+    preservePointRequest: true,
+    fade: false,
+  });
+  pointReadSession.markPhase(request.token, "warming");
+  setPointReadBusy("warming");
+  renderPointReadHighlight(target, { phase: "warming" });
+  setTtsStatusText("正在准备你点到的这句话");
+
+  const requestIsCurrent = () => Boolean(
+    pointReadSession.isCurrent(request.token) &&
+    allowed()
+  );
+  try {
+    const ready = await warmupTtsProvider();
+    if (ready !== true || !requestIsCurrent()) {
+      if (pointReadSession.isCurrent(request.token)) {
+        settlePointReadPlayback("failed", request.token);
+      }
+      return false;
+    }
+    const speechTarget = {
+      ...target,
+      speechKey: target.key,
+      pointReadRequestId: request.token,
+    };
+    if (!ttsController.requestTarget(action, speechTarget)) {
+      settlePointReadPlayback("failed", request.token);
+      return false;
+    }
+    pointReadSession.markPhase(request.token, "synthesizing");
+    setPointReadBusy("synthesizing");
+    renderPointReadHighlight(target, { phase: "queued" });
+    const box = target.normalizedBbox;
+    const result = await ttsController.tick({
+      isPlaying: false,
+      chunks: [],
+      normalizedReadingY: Math.max(0, Math.min(1,
+        Number(box?.y ?? 0) + Number(box?.height ?? 0) / 2,
+      )),
+      pageNumber,
+      documentGeneration: loadGeneration,
+    });
+    if (!pointReadSession.isCurrent(request.token)) return false;
+    if (!result?.chunk) {
+      settlePointReadPlayback("failed", request.token);
+      return false;
+    }
+    return true;
+  } catch {
+    if (pointReadSession.isCurrent(request.token)) {
+      settlePointReadPlayback("failed", request.token);
+    }
+    refreshTtsRuntimeStatus();
+    return false;
+  }
+}
+
+function toggleTtsEnabled() {
+  return setTtsEnabled(!ttsController.isEnabled());
+}
+
 function speedTierIndex(value) {
   const themeKey = speedTier(value).themeKey;
   return Math.max(0, SPEED_TIERS.findIndex((tier) => tier.themeKey === themeKey));
@@ -350,6 +1318,125 @@ function isBackgroundClick(event) {
   return !event.target.closest(
     ".page-shell, canvas, button, label, input, .home-echo, .tagline-cloud, .primary-button, .controls, .ocr-dock, .error-panel",
   );
+}
+
+function pointReadTargetAtEvent(event) {
+  if (!isPointReadPolicy() || !ttsController.isEnabled()) return null;
+  const shell = event.target instanceof Element
+    ? event.target.closest(".page-shell")
+    : null;
+  if (!shell) return null;
+  const pageNumber = Number(shell.dataset.page);
+  if (!Number.isInteger(pageNumber)) return null;
+  const directKey = event.target instanceof Element
+    ? event.target.closest("[data-point-sentence-key]")?.dataset.pointSentenceKey
+    : null;
+  const targets = pointSentenceTargetsForPage(pageNumber);
+  if (directKey) {
+    const directTarget = targets.find((target) => target.key === directKey);
+    if (directTarget) return directTarget;
+  }
+  const rectangle = shell.getBoundingClientRect();
+  if (rectangle.width <= 0 || rectangle.height <= 0) return null;
+  return pickPointSentence(targets, {
+    x: (event.clientX - rectangle.left) / rectangle.width,
+    y: (event.clientY - rectangle.top) / rectangle.height,
+    maxDistance: 0.035,
+    pageIndex: pageNumber - 1,
+  });
+}
+
+function interruptPointReadForUser(reason = "user-intervention") {
+  if (!pointReadIsActive()) return false;
+  pointReadSession.interrupt(reason);
+  cancelSpeechSession(reason);
+  return true;
+}
+
+function updatePointReadHover(event) {
+  if (!shouldRenderPointReadHover({
+    sessionActive: pointReadIsActive(),
+    buttons: event.buttons,
+    policyEnabled: isPointReadPolicy(),
+    masterEnabled: ttsController.isEnabled(),
+    ready: readyToMove,
+  })) return;
+  const target = pointReadTargetAtEvent(event);
+  if (target) {
+    renderPointReadHighlight(target, { phase: "hover" });
+    setTtsStatusText("单击读这一句；拖动可以选择文字");
+  } else {
+    clearPointReadHighlight();
+    setTtsStatusText(pointSentenceTargetsForPage(activeReadingPage).length
+      ? "把鼠标移到一句话上，再轻点一下"
+      : ttsTextWaitHelp());
+  }
+}
+
+function beginPointReadGesture(event) {
+  if (
+    !isPointReadPolicy() ||
+    !ttsController.isEnabled() ||
+    event.pointerType === "touch"
+  ) {
+    return;
+  }
+  const target = pointReadTargetAtEvent(event);
+  pointReadGesture = {
+    pointerId: event.pointerId,
+    button: event.button,
+    pointerType: event.pointerType,
+    startX: event.clientX,
+    startY: event.clientY,
+    movement: 0,
+    target,
+    targetKey: target?.key ?? null,
+    modified: Boolean(event.ctrlKey || event.metaKey || event.altKey),
+    interrupted: false,
+  };
+}
+
+function movePointReadGesture(event) {
+  if (pointReadGesture?.pointerId !== event.pointerId) return;
+  pointReadGesture.movement = Math.max(
+    pointReadGesture.movement,
+    Math.hypot(
+      event.clientX - pointReadGesture.startX,
+      event.clientY - pointReadGesture.startY,
+    ),
+  );
+  if (pointReadGesture.movement > 6 && !pointReadGesture.interrupted) {
+    pointReadGesture.interrupted = true;
+    interruptPointReadForUser("text-selection");
+  }
+}
+
+function finishPointReadGesture(event) {
+  const gesture = pointReadGesture;
+  if (!gesture || gesture.pointerId !== event.pointerId) return;
+  pointReadGesture = null;
+  const upTarget = pointReadTargetAtEvent(event);
+  window.setTimeout(() => {
+    const selection = window.getSelection?.();
+    const activate = shouldActivatePointReadGesture({
+      button: gesture.button,
+      pointerType: gesture.pointerType,
+      movement: Math.max(
+        gesture.movement,
+        Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY),
+      ),
+      maxMovement: 6,
+      downTargetKey: gesture.targetKey,
+      upTargetKey: upTarget?.key ?? null,
+      selectionCollapsed: selection ? selection.isCollapsed : true,
+      modified: gesture.modified || Boolean(event.ctrlKey || event.metaKey || event.altKey),
+    });
+    if (activate && upTarget) {
+      void requestPointSpeech(upTarget);
+    } else if (selection && !selection.isCollapsed) {
+      interruptPointReadForUser("text-selection");
+    }
+  }, 0);
 }
 
 function showRestoreMessage(record) {
@@ -480,31 +1567,278 @@ function nearbyPageNumbers(centerPage) {
   return pages;
 }
 
+function resolvePageTextSource(pageNumber) {
+  return resolveTextSourceState({
+    nativeKnown: nativeTextAssessments.has(pageNumber),
+    nativeAssessment: nativeTextAssessments.get(pageNumber) ?? null,
+    ocrKnown: ocrTextAssessments.has(pageNumber),
+    ocrAssessment: ocrTextAssessments.get(pageNumber) ?? null,
+    ocrTask: ocrTaskByPage.get(pageNumber) ?? null,
+    ocrFailed: ocrFailureByPage.has(pageNumber),
+  });
+}
+
+function textSourceStateForPage(pageNumber) {
+  if (!Number.isInteger(pageNumber) || pageNumber < 1) {
+    return resolvePageTextSource(0);
+  }
+  return pageTextSourceStates.get(pageNumber) ?? resolvePageTextSource(pageNumber);
+}
+
+function updateCurrentTextSourceStatus(pageNumber = activeReadingPage) {
+  if (!pageNumber || !elements.ocrStatus) return;
+  const sourceState = textSourceStateForPage(pageNumber);
+  const hasReadyOcrEstimate = (
+    sourceState.selectedSource === "native" &&
+    ocrTextAssessments.get(pageNumber)?.state === "ready"
+  );
+  const messages = {
+    "checking-native": "正在检查本页的原生文字",
+    "native-ready": hasReadyOcrEstimate
+      ? "朗读使用原生文字；扫描结果已校准速度估算"
+      : "已使用 PDF 原生文字，也可扫描增强速度估算",
+    "ocr-needed": "本页原生文字较少，可以扫描补足",
+    "ocr-scheduled": "附近页扫描已经排队",
+    "ocr-running": "原生文字较少，正在补扫附近页",
+    "ocr-ready": "本页已用本地扫描补足文字",
+    "ocr-poor": "扫描完成，但本页仍没有足够的可读文字",
+    "ocr-failed": "扫描未完成，可以点按重试",
+    "ocr-suppressed": "本页暂不自动扫描",
+  };
+  elements.ocrStatus.hidden = false;
+  elements.ocrStatus.textContent = messages[sourceState.state] ?? "";
+}
+
+function reconcilePageTextSource(
+  pageNumber,
+  { allowAutoOcr = false } = {},
+) {
+  if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > pageCount) {
+    return null;
+  }
+  const previous = pageTextSourceStates.get(pageNumber) ?? null;
+  const next = resolvePageTextSource(pageNumber);
+  pageTextSourceStates.set(pageNumber, next);
+
+  if (previous && previous.selectedSource !== next.selectedSource) {
+    if (pageNumber === activeReadingPage) {
+      cancelSpeechSession("text-source-changed");
+    }
+    syncPointReadSurfaces();
+  }
+
+  if (pageNumber === activeReadingPage) {
+    lastEstimateSignature = "";
+    renderSpeedEstimate("density");
+    updateCurrentTextSourceStatus(pageNumber);
+    updateOcrControls();
+    if (next.ttsReady && playing) updateTtsSchedulerDiagnostics(pageNumber);
+  }
+
+  if (
+    allowAutoOcr &&
+    pageNumber === activeReadingPage &&
+    next.shouldScheduleOcr
+  ) {
+    scheduleNearbyOcr(pageNumber, { priorityPage: pageNumber });
+  }
+  publishDiagnostics();
+  return next;
+}
+
 function clearTextSession() {
   textWindowRequest += 1;
   activeReadingPage = 0;
   lastEstimateSignature = "";
   pageTextCache = new Map();
   pageTextRequests = new Map();
+  pageReadableChunkCache = new Map();
+  pageParagraphPassageCache = new Map();
+  pagePointSentenceCache = new Map();
   ocrTextCache = new Map();
-  ocrEnabled = false;
-  ocrFailed = false;
+  ocrReadableChunkCache = new Map();
+  ocrParagraphPassageCache = new Map();
+  ocrPointSentenceCache = new Map();
+  paragraphPassageRevisions = new Map();
+  paragraphFlowContextState = null;
+  ttsParagraphJumpPending = false;
+  nativeTextAssessments = new Map();
+  ocrTextAssessments = new Map();
+  pageTextSourceStates = new Map();
+  ocrTaskByPage = new Map();
+  ocrFailureByPage = new Map();
+  ocrWorkloadActive = false;
+  ocrLastError = null;
   ocrScanRequest += 1;
-  window.clearTimeout(ocrScheduleTimer);
-  ocrScheduleTimer = 0;
+  ocrTaskScheduler.cancel("document-cleared");
   ocrAbortController?.abort();
   ocrAbortController = null;
   ocrProgressPosition = null;
+  cancelSpeechSession("document-cleared", { reset: true });
+  clearPointReadTextLayers();
   void ocrProvider?.reset?.();
   updateOcrControls();
+  updateRenderBudget();
 }
 
 function bestPageTextStats(pageNumber) {
-  return (
-    (ocrEnabled ? ocrTextCache.get(pageNumber) : null) ??
-    pageTextCache.get(pageNumber) ??
-    null
+  const source = textSourceStateForPage(pageNumber).selectedSource;
+  const ocrAssessment = ocrTextAssessments.get(pageNumber) ?? null;
+  if (
+    ocrTextCache.has(pageNumber) &&
+    assessmentSupportsDensity(ocrAssessment)
+  ) {
+    return ocrTextCache.get(pageNumber);
+  }
+  if (source === "native") {
+    return pageTextCache.get(pageNumber) ?? null;
+  }
+  if (source === "ocr") return ocrTextCache.get(pageNumber) ?? null;
+  return null;
+}
+
+function readableChunkPreview(chunk) {
+  const text = typeof chunk?.text === "string" ? chunk.text : "";
+  return {
+    chunkIndex: chunk?.chunkIndex ?? 0,
+    role: chunk?.role ?? "unknown",
+    languageHint: chunk?.languageHint ?? "unknown",
+    yStart: chunk?.yStart,
+    yEnd: chunk?.yEnd,
+    normalizedYStart: chunk?.normalizedBbox?.y ?? null,
+    normalizedYEnd: chunk?.normalizedBbox
+      ? chunk.normalizedBbox.y + chunk.normalizedBbox.height
+      : null,
+    text: text.length > 160 ? `${text.slice(0, 157)}…` : text,
+  };
+}
+
+function readableChunksForPage(pageNumber) {
+  return selectReadableChunks({
+    selectedSource: textSourceStateForPage(pageNumber).selectedSource,
+    nativeChunks: pageReadableChunkCache.get(pageNumber) ?? [],
+    ocrChunks: ocrReadableChunkCache.get(pageNumber) ?? [],
+  });
+}
+
+function continuousSpeechPrefetchChunks(pageNumber, policy = currentTtsPolicy()) {
+  if (policy?.tierKey !== "snow-mist") return [];
+  const nextPage = pageNumber + 1;
+  if (nextPage > pageCount) return [];
+  return readableChunksForPage(nextPage);
+}
+
+function pointSentenceTargetsForPage(pageNumber) {
+  const selectedSource = textSourceStateForPage(pageNumber).selectedSource;
+  const targets = selectedSource === "native"
+    ? pagePointSentenceCache.get(pageNumber) ?? []
+    : selectedSource === "ocr"
+      ? ocrPointSentenceCache.get(pageNumber) ?? []
+      : [];
+  return targets.filter((target) => (
+    ttsController.canSpeakChunk(target, { explicitTarget: true })
+  ));
+}
+
+function paragraphPassagesForPage(pageNumber) {
+  const selectedSource = textSourceStateForPage(pageNumber).selectedSource;
+  if (selectedSource === "native") {
+    return pageParagraphPassageCache.get(pageNumber) ?? [];
+  }
+  if (selectedSource === "ocr") {
+    return ocrParagraphPassageCache.get(pageNumber) ?? [];
+  }
+  return [];
+}
+
+function bumpParagraphPassageRevision(pageNumber, source) {
+  const revisions = paragraphPassageRevisions.get(pageNumber) ?? {
+    native: 0,
+    ocr: 0,
+  };
+  paragraphPassageRevisions.set(pageNumber, {
+    ...revisions,
+    [source]: (revisions[source] ?? 0) + 1,
+  });
+}
+
+function paragraphPassageRevisionForPage(pageNumber, source) {
+  return paragraphPassageRevisions.get(pageNumber)?.[source] ?? 0;
+}
+
+function paragraphWindowForPage(pageNumber) {
+  const pages = [pageNumber - 1, pageNumber, pageNumber + 1]
+    .filter((candidate) => candidate >= 1 && candidate <= pageCount);
+  const linked = linkCrossPageParagraphs(
+    pages.flatMap((candidate) => paragraphPassagesForPage(candidate)),
   );
+  const pageMetrics = new Map(
+    pages.map((candidate) => {
+      const pageIndex = candidate - 1;
+      return [
+        pageIndex,
+        {
+          pageTop: pageTops[pageIndex],
+          pageHeight: pageLayout[pageIndex]?.height ??
+            pageShells[pageIndex]?.offsetHeight ??
+            0,
+        },
+      ];
+    }),
+  );
+  return materializeParagraphBoundaries(linked, pageMetrics);
+}
+
+function paragraphFlowContextKey(pageNumber = activeReadingPage) {
+  const pages = [pageNumber - 1, pageNumber, pageNumber + 1]
+    .filter((candidate) => candidate >= 1 && candidate <= pageCount);
+  const advanced = advanceParagraphFlowContext(paragraphFlowContextState, {
+    documentGeneration: loadGeneration,
+    controllerGeneration: ttsController.getGeneration(),
+    pageNumber,
+    windowSources: pages.map((candidate) => {
+      const source = textSourceStateForPage(candidate).selectedSource ?? "none";
+      return {
+        pageNumber: candidate,
+        source,
+        revision: paragraphPassageRevisionForPage(candidate, source),
+      };
+    }),
+  });
+  paragraphFlowContextState = advanced.state;
+  return advanced.key;
+}
+
+function collectReadableChunkDiagnostics() {
+  const nearby = nearbyPageNumbers(activeReadingPage).map((pageNumber) => {
+    const sourceState = textSourceStateForPage(pageNumber);
+    const chunks = readableChunksForPage(pageNumber);
+    return {
+      pageNumber,
+      state: sourceState.state,
+      source: sourceState.selectedSource,
+      ready: sourceState.ttsReady,
+      count: chunks.length,
+      paragraphs: paragraphPassagesForPage(pageNumber).length,
+      nativeAssessment: nativeTextAssessments.get(pageNumber) ?? null,
+      ocrAssessment: ocrTextAssessments.get(pageNumber) ?? null,
+      ocrTask: ocrTaskByPage.get(pageNumber) ?? null,
+      ocrError: ocrFailureByPage.get(pageNumber) ?? null,
+      preview: chunks.slice(0, 5).map(readableChunkPreview),
+    };
+  });
+  return {
+    source: textSourceStateForPage(activeReadingPage).selectedSource,
+    state: textSourceStateForPage(activeReadingPage).state,
+    cachedPages: {
+      native: pageReadableChunkCache.size,
+      ocr: ocrReadableChunkCache.size,
+      nativeParagraphs: pageParagraphPassageCache.size,
+      ocrParagraphs: ocrParagraphPassageCache.size,
+    },
+    currentPage: activeReadingPage,
+    nearby,
+  };
 }
 
 async function extractPageTextStats(pageNumber, generation) {
@@ -514,14 +1848,48 @@ async function extractPageTextStats(pageNumber, generation) {
 
   const request = activePdf
     .getPage(pageNumber)
-    .then((page) => page.getTextContent())
-    .then((content) => {
+    .then(async (page) => {
+      const content = await page.getTextContent();
+      return { content, viewport: page.getViewport({ scale: 1 }) };
+    })
+    .then(({ content, viewport }) => {
       if (generation !== loadGeneration) return null;
       const text = content.items
         .map((item) => (typeof item.str === "string" ? item.str : ""))
         .join(" ");
       const stats = analyzeText(text);
+      const segments = segmentsFromPdfTextContent({
+        pageIndex: pageNumber - 1,
+        textContent: content,
+        source: "native-text",
+        viewport,
+      });
+      const textLayoutOptions = {
+        pageWidth: viewport.width,
+        pageDimensions: {
+          width: viewport.width,
+          height: viewport.height,
+          coordinateSystem: "top-down",
+        },
+        coordinateSystem: "top-down",
+        minChars: 120,
+        maxChars: 420,
+      };
+      const chunks = segmentsToReadableChunks(segments, textLayoutOptions);
+      const paragraphs = segmentsToParagraphPassages(segments, textLayoutOptions);
+      const pointSentences = createPointSentenceTargets(segments, textLayoutOptions);
       pageTextCache.set(pageNumber, stats);
+      pageReadableChunkCache.set(pageNumber, chunks);
+      pageParagraphPassageCache.set(pageNumber, paragraphs);
+      pagePointSentenceCache.set(pageNumber, pointSentences);
+      bumpParagraphPassageRevision(pageNumber, "native");
+      nativeTextAssessments.set(pageNumber, assessTextQuality({
+        segments,
+        chunks,
+        source: "native-text",
+      }));
+      reconcilePageTextSource(pageNumber);
+      syncPointReadSurfaces();
       return stats;
     })
     .finally(() => {
@@ -585,7 +1953,7 @@ function computeReadingEstimate() {
     remainingPixels,
     pixelsPerSecond: speed,
     tier: speedTier(speed),
-    source: ocrEnabled ? "ocr-or-native-text" : "native-text",
+    source: textSourceStateForPage(activeReadingPage).selectedSource,
   });
 }
 
@@ -660,6 +2028,7 @@ function updateSpeedPresentation(origin = "initial") {
   elements.controls.dataset.theme = tier.themeKey;
   document.documentElement.dataset.readerTheme = tier.themeKey;
   renderSpeedEstimate(origin === "manual" ? "manual" : "density");
+  enforceTtsAvailability("speed-tier-unavailable");
 }
 
 function animateManualSpeedChange(delta) {
@@ -701,6 +2070,16 @@ async function refreshNearbyTextStats(centerPage, generation) {
     } catch {
       if (generation === loadGeneration) {
         pageTextCache.set(pageNumber, analyzeText(""));
+        pageReadableChunkCache.set(pageNumber, []);
+        pageParagraphPassageCache.set(pageNumber, []);
+        pagePointSentenceCache.set(pageNumber, []);
+        bumpParagraphPassageRevision(pageNumber, "native");
+        nativeTextAssessments.set(pageNumber, assessTextQuality({
+          segments: [],
+          chunks: [],
+          source: "native-text",
+        }));
+        reconcilePageTextSource(pageNumber);
       }
     }
     if (
@@ -709,21 +2088,76 @@ async function refreshNearbyTextStats(centerPage, generation) {
       activeReadingPage === centerPage
     ) {
       renderSpeedEstimate("density");
+      updateTtsSchedulerDiagnostics(centerPage);
+      publishDiagnostics();
     }
   }
+  if (
+    request === textWindowRequest &&
+    generation === loadGeneration &&
+    activeReadingPage === centerPage
+  ) {
+    reconcilePageTextSource(centerPage, { allowAutoOcr: true });
+  }
+}
+
+function cancelOcrWorkload(reason = "ocr-cancelled") {
+  if (!ocrWorkloadActive && !ocrAbortController && ocrTaskByPage.size === 0) {
+    return;
+  }
+  ocrScanRequest += 1;
+  ocrTaskScheduler.cancel(reason);
+  const hadActiveScan = Boolean(
+    ocrAbortController &&
+    !ocrAbortController.signal.aborted
+  );
+  ocrAbortController?.abort();
+  ocrAbortController = null;
+  if (hadActiveScan) void ocrProvider?.cancel?.();
+  ocrProgressPosition = null;
+  ocrWorkloadActive = false;
+  for (const [pageNumber] of ocrTaskByPage) {
+    ocrTaskByPage.delete(pageNumber);
+    reconcilePageTextSource(pageNumber);
+  }
+  updateRenderBudget();
+  updateOcrControls();
 }
 
 function handleReadingPageChange(pageNumber) {
   if (!pageNumber) return;
   const pageChanged = pageNumber !== activeReadingPage;
   if (pageChanged) {
+    const previousPage = activeReadingPage;
+    const keepWindingStreamContext = shouldPreserveParagraphFlowOnPageChange({
+      enabled: ttsController.isEnabled(),
+      tierKey: currentTtsPolicy().tierKey,
+      previousPage,
+      nextPage: pageNumber,
+      direction: scrollDirection,
+      jumped: ttsParagraphJumpPending,
+    });
+    const keepContinuousSpeech = shouldPreserveContinuousSpeechOnPageChange({
+      enabled: ttsController.isEnabled(),
+      tierKey: currentTtsPolicy().tierKey,
+      previousPage,
+      nextPage: pageNumber,
+      direction: scrollDirection,
+      jumped: ttsParagraphJumpPending,
+    });
+    if (previousPage && !keepWindingStreamContext && !keepContinuousSpeech) {
+      ttsParagraphJumpPending = true;
+      cancelSpeechSession("page-changed");
+    }
     pageShells[activeReadingPage - 1]?.classList.remove("is-active");
     activeReadingPage = pageNumber;
     pageShells[activeReadingPage - 1]?.classList.add("is-active");
+    cancelOcrWorkload("page-changed");
     lastEstimateSignature = "";
     renderSpeedEstimate("density");
-    void refreshNearbyTextStats(pageNumber, loadGeneration);
-    if (ocrEnabled) scheduleNearbyOcr(pageNumber);
+    void refreshNearbyTextStats(pageNumber, loadGeneration).finally(updateOcrControls);
+    updateOcrControls();
+    syncPointReadSurfaces();
   }
 
   if (pageChanged || lastScheduledDirection !== scrollDirection) {
@@ -738,11 +2172,16 @@ function handleReadingPageChange(pageNumber) {
   }
 }
 
-function setPlaying(next) {
+function setPlaying(next, { cancelSpeech = true } = {}) {
   playing = next;
+  if (!playing && cancelSpeech) {
+    cancelSpeechSession("paused");
+    renderTtsReadingLine(activeReadingPage || currentPageNumber(), { phase: "tracking" });
+  }
   elements.toggleIcon.textContent = playing ? "Ⅱ" : "▶";
   elements.toggleText.textContent = playing ? "暂停" : "继续";
   elements.toggle.setAttribute("aria-pressed", String(!playing));
+  publishDiagnostics();
 }
 
 function clearFirstPageMessageTimer() {
@@ -954,7 +2393,8 @@ async function prepareFinalPage(pdf, pageNumber, generation, { signal }) {
       commit() {
         if (disposed || generation !== loadGeneration) return;
         const previousCanvas = shell.querySelector("canvas");
-        shell.replaceChildren(canvas);
+        if (previousCanvas) previousCanvas.replaceWith(canvas);
+        else shell.prepend(canvas);
         if (previousCanvas && previousCanvas !== canvas) releaseCanvas(previousCanvas);
         shell.classList.remove("rendering");
         shell.classList.add("rendered");
@@ -1009,7 +2449,9 @@ async function prepareFinalPage(pdf, pageNumber, generation, { signal }) {
 
 function updateRenderBudget() {
   renderScheduler?.setBudget(
-    cacheBudgetForDeviceMemory(deviceMemoryGb, { ocrEnabled }),
+    cacheBudgetForDeviceMemory(deviceMemoryGb, {
+      ocrEnabled: ocrWorkloadActive,
+    }),
   );
   publishDiagnostics();
 }
@@ -1175,7 +2617,9 @@ async function openPdf(sourceOrFactory, displayName, { fileMeta = null } = {}) {
 
   renderScheduler = new RenderScheduler({
     concurrency: 2,
-    budget: cacheBudgetForDeviceMemory(deviceMemoryGb, { ocrEnabled }),
+    budget: cacheBudgetForDeviceMemory(deviceMemoryGb, {
+      ocrEnabled: ocrWorkloadActive,
+    }),
     render: (pageNumber, options) => prepareFinalPage(
       pdf,
       pageNumber,
@@ -1201,6 +2645,105 @@ function currentPageNumber() {
   if (!pageTops.length) return 0;
   const readingLine = elements.viewport.scrollTop + elements.viewport.clientHeight * 0.38;
   return findPageNumberAtOffset(pageTops, readingLine);
+}
+
+function normalizedReadingLineForPage(pageNumber) {
+  const index = pageNumber - 1;
+  const pageTop = pageTops[index];
+  const pageHeight = pageLayout[index]?.height || pageShells[index]?.offsetHeight || 0;
+  if (!Number.isFinite(pageTop) || pageHeight <= 0) return 0.38;
+  const readingLine = elements.viewport.scrollTop + elements.viewport.clientHeight * 0.38;
+  return Math.max(0, Math.min(1, (readingLine - pageTop) / pageHeight));
+}
+
+function scheduleContinuousSpeechOcrAhead(
+  pageNumber,
+  policy = currentTtsPolicy(),
+) {
+  const nextPage = pageNumber + 1;
+  const targetPage = continuousOcrAheadPage({
+    enabled: ttsController.isEnabled(),
+    tierKey: policy?.tierKey,
+    isPlaying: playing,
+    workloadActive: ocrWorkloadActive,
+    currentPage: pageNumber,
+    pageCount,
+    nextPageNativeKnown: nativeTextAssessments.has(nextPage),
+    nextPageTtsReady: textSourceStateForPage(nextPage).ttsReady,
+    nextPageOcrKnown: (
+      ocrTextAssessments.has(nextPage) ||
+      ocrTaskByPage.has(nextPage)
+    ),
+    nextPageFailed: ocrFailureByPage.has(nextPage),
+  });
+  if (!targetPage) return false;
+  return scheduleNearbyOcr(targetPage, { priorityPage: targetPage });
+}
+
+function updateTtsSchedulerDiagnostics(pageNumber = activeReadingPage) {
+  if (!pageNumber || !readyToMove) return;
+  const controllerSnapshot = ttsController.snapshot();
+  scheduleContinuousSpeechOcrAhead(pageNumber, controllerSnapshot.policy);
+  const audioSnapshot = ttsAudioPlayer.snapshot();
+  const schedulerSnapshot = ttsScheduler.snapshot();
+  const paragraphFlowActive = controllerSnapshot.policy.autoRead === "paragraph-lead";
+  if (ttsWarmupStatus === "loading" && !controllerSnapshot.manualArmedAction) {
+    refreshTtsRuntimeStatus();
+    publishDiagnostics();
+    return;
+  }
+  if (
+    (ttsUtteranceLocked || audioSnapshot.active || schedulerSnapshot.active) &&
+    !controllerSnapshot.manualArmedAction &&
+    !paragraphFlowActive
+  ) {
+    refreshTtsRuntimeStatus();
+    publishDiagnostics();
+    return;
+  }
+  const clock = createReadingClockSnapshot({
+    isPlaying: playing,
+    speedPxPerSecond: speed,
+    scrollTop: elements.viewport.scrollTop,
+    viewportHeight: elements.viewport.clientHeight,
+    scrollHeight: elements.viewport.scrollHeight,
+    currentPageIndex: pageNumber - 1,
+  });
+  const paragraphJumped = paragraphFlowActive && ttsParagraphJumpPending;
+  ttsParagraphJumpPending = false;
+  void ttsController.tick({
+    isPlaying: clock.isPlaying,
+    chunks: readableChunksForPage(pageNumber),
+    prefetchChunks: continuousSpeechPrefetchChunks(
+      pageNumber,
+      controllerSnapshot.policy,
+    ),
+    normalizedReadingY: normalizedReadingLineForPage(pageNumber),
+    pageHeightPx: (
+      pageLayout[pageNumber - 1]?.height ||
+      pageShells[pageNumber - 1]?.offsetHeight ||
+      0
+    ),
+    scrollPxPerSecond: speed,
+    pageNumber,
+    documentGeneration: loadGeneration,
+    paragraphs: paragraphFlowActive ? paragraphWindowForPage(pageNumber) : [],
+    readingPosition: clock.readingLineY,
+    paragraphContextKey: paragraphFlowActive ? paragraphFlowContextKey(pageNumber) : null,
+    jumped: paragraphJumped,
+  }).finally(() => {
+    const nextScheduler = ttsScheduler.snapshot();
+    const nextAudio = ttsAudioPlayer.snapshot();
+    if (
+      ["failed", "cancelled", "paused", "simulated", "late-skip", "visual-skip"].includes(nextScheduler.status) &&
+      !nextAudio.active
+    ) {
+      ttsUtteranceLocked = false;
+      if (["late-skip", "visual-skip"].includes(nextScheduler.status)) clearTtsFocus();
+    }
+    refreshTtsRuntimeStatus();
+    publishDiagnostics();
+  });
 }
 
 function resizeRenderedPages() {
@@ -1242,6 +2785,7 @@ function resizeRenderedPages() {
   });
   lastScheduledDirection = 0;
   updateReadingStatus(true);
+  syncPointReadSurfaces();
 }
 
 function updateReadingStatus(force = false, now = 0) {
@@ -1260,8 +2804,23 @@ function updateReadingStatus(force = false, now = 0) {
   lastObservedScrollTop = elements.viewport.scrollTop;
 
   const page = currentPageNumber();
+  const largeReadingJump = isLargeParagraphReadingJump({
+    scrollDelta,
+    viewportHeight: elements.viewport.clientHeight,
+  });
+  if (
+    largeReadingJump &&
+    ttsController.isEnabled()
+  ) {
+    ttsParagraphJumpPending = true;
+    if (page === activeReadingPage) cancelSpeechSession("reading-jumped");
+  }
   elements.pageStatus.textContent = page ? `${page} / ${pageCount} 页` : "准备中";
   handleReadingPageChange(page);
+  if (!ttsUtteranceLocked || !document.querySelector(".tts-focus")) {
+    renderTtsReadingLine(page, { phase: ttsUtteranceLocked ? "speaking" : "tracking" });
+  }
+  updateTtsSchedulerDiagnostics(page);
   schedulePersistReadingRecord();
 }
 
@@ -1270,7 +2829,7 @@ function animate(timestamp) {
   const elapsed = Math.min(64, timestamp - lastFrame);
   lastFrame = timestamp;
 
-  const desiredSpeed = readyToMove && playing && !document.hidden ? speed : 0;
+  const desiredSpeed = readyToMove && playing && !pointReadScrollHold && !document.hidden ? speed : 0;
   const easing = 1 - Math.exp(-elapsed / 420);
   easedSpeed += (desiredSpeed - easedSpeed) * easing;
 
@@ -1307,6 +2866,7 @@ elements.toggle.addEventListener("click", () => {
 });
 
 elements.speed.addEventListener("input", () => {
+  interruptPointReadForUser("speed-changed");
   const previousSpeed = speed;
   speed = Number(elements.speed.value);
   const delta = speed - previousSpeed;
@@ -1317,7 +2877,25 @@ elements.speed.addEventListener("input", () => {
   schedulePersistReadingRecord();
 });
 
-function cacheOcrPageText(pageNumber, text, generation = loadGeneration) {
+elements.ttsModeButton?.addEventListener("click", () => {
+  toggleTtsEnabled();
+});
+
+elements.ttsPointReadButton?.addEventListener("click", () => {
+  toggleTtsEnabled();
+});
+
+elements.ttsManualReadButton?.addEventListener("click", () => {
+  void requestLineSpeech();
+});
+
+function cacheOcrPageText(
+  pageNumber,
+  result,
+  generation = loadGeneration,
+  request = null,
+) {
+  const text = typeof result === "string" ? result : result?.text;
   if (
     generation !== loadGeneration ||
     !Number.isInteger(pageNumber) ||
@@ -1329,8 +2907,63 @@ function cacheOcrPageText(pageNumber, text, generation = loadGeneration) {
   }
 
   ocrTextCache.set(pageNumber, analyzeText(text, "ocr"));
+  let segments = [];
+  let chunks = [];
+  let paragraphs = [];
+  let pointSentences = [];
+  if (typeof result === "object" && result !== null) {
+    segments = segmentsFromOcrResult({
+      pageIndex: pageNumber - 1,
+      result,
+      source: "ocr",
+    });
+    const textLayoutOptions = {
+      pageWidth: result.pageDimensions?.width,
+      pageDimensions: result.pageDimensions
+        ? { ...result.pageDimensions, coordinateSystem: "top-down" }
+        : null,
+      coordinateSystem: "top-down",
+      minChars: 24,
+      maxChars: 180,
+    };
+    chunks = segmentsToReadableChunks(segments, textLayoutOptions);
+    paragraphs = segmentsToParagraphPassages(segments, textLayoutOptions);
+    const pointSegments = segmentsFromOcrResult({
+      pageIndex: pageNumber - 1,
+      result,
+      source: "ocr",
+      // CJK OCR word boxes are frequently fragmented or returned in an
+      // unstable order. Tesseract's line boxes preserve a much more coherent
+      // reading stream; Latin scans retain word boxes for precise clicking.
+      prefer: pointSegmentPreferenceForOcrLanguageSet(result.languageSet),
+    });
+    pointSentences = createPointSentenceTargets(
+      pointSegments.length ? pointSegments : segments,
+      textLayoutOptions,
+    );
+  }
+  ocrReadableChunkCache.set(pageNumber, chunks);
+  ocrParagraphPassageCache.set(pageNumber, paragraphs);
+  ocrPointSentenceCache.set(pageNumber, pointSentences);
+  bumpParagraphPassageRevision(pageNumber, "ocr");
+  ocrTextAssessments.set(pageNumber, assessTextQuality({
+    segments,
+    chunks,
+    source: "ocr",
+    languageSet: result?.languageSet ?? "",
+  }));
+  ocrFailureByPage.delete(pageNumber);
+  if (
+    request === null ||
+    ocrTaskByPage.get(pageNumber)?.request === request
+  ) {
+    ocrTaskByPage.delete(pageNumber);
+  }
+  reconcilePageTextSource(pageNumber);
+  syncPointReadSurfaces();
   if (nearbyPageNumbers(activeReadingPage).includes(pageNumber)) {
     renderSpeedEstimate("density");
+    publishDiagnostics();
   }
   return true;
 }
@@ -1345,19 +2978,39 @@ function registerOcrProvider(provider) {
 }
 
 function updateOcrControls() {
-  elements.ocrButton.disabled = !ocrProvider || !readyToMove;
-  let buttonText = "扫描页增强估算";
-  if (ocrEnabled) {
-    buttonText = ocrFailed ? "重试扫描增强" : "关闭扫描增强";
-  }
-  elements.ocrButton.textContent = buttonText;
-  elements.ocrButton.setAttribute("aria-pressed", String(ocrEnabled));
-  elements.ocrDock.dataset.active = String(ocrEnabled);
+  const sourceState = textSourceStateForPage(activeReadingPage);
+  const buttonTextByState = {
+    "checking-native": "正在检查文字…",
+    "native-ready": "扫描页增强",
+    "ocr-needed": "扫描附近页",
+    "ocr-scheduled": "扫描已排队…",
+    "ocr-running": "正在扫描附近页…",
+    "ocr-ready": "重新扫描本页",
+    "ocr-poor": "重试本页扫描",
+    "ocr-failed": "重试本页扫描",
+    "ocr-suppressed": "扫描本页",
+  };
+  elements.ocrButton.disabled = (
+    !ocrProvider ||
+    !readyToMove ||
+    !activePdf ||
+    ocrWorkloadActive ||
+    sourceState.state === "checking-native"
+  );
+  elements.ocrButton.textContent = ocrWorkloadActive
+    ? sourceState.state === "ocr-scheduled"
+      ? "扫描已排队…"
+      : "正在扫描附近页…"
+    : buttonTextByState[sourceState.state] ?? "扫描附近页";
+  elements.ocrButton.removeAttribute("aria-pressed");
+  elements.ocrButton.setAttribute("aria-busy", String(ocrWorkloadActive));
+  elements.ocrDock.dataset.active = String(ocrWorkloadActive);
   elements.ocrDock.hidden = !ocrProvider || !activePdf || !readyToMove;
+  syncTtsControlVisibility();
 }
 
 function describeOcrProgress(message) {
-  if (!ocrEnabled || !message) return;
+  if (!ocrWorkloadActive || !message) return;
   const percent = Number.isFinite(message.progress)
     ? `${Math.round(message.progress * 100)}%`
     : "";
@@ -1377,9 +3030,14 @@ function describeOcrProgress(message) {
   }
 }
 
-async function runNearbyOcr(centerPage, generation, request) {
+async function runNearbyOcr(
+  centerPage,
+  generation,
+  request,
+  priorityPage = centerPage,
+) {
   if (
-    !ocrEnabled ||
+    !ocrWorkloadActive ||
     !ocrProvider ||
     !activePdf ||
     request !== ocrScanRequest ||
@@ -1388,43 +3046,70 @@ async function runNearbyOcr(centerPage, generation, request) {
     return;
   }
 
-  const pages = nearbyPageNumbers(centerPage).filter(
-    (pageNumber) => !ocrTextCache.has(pageNumber),
-  );
-  if (!pages.length) {
-    elements.ocrStatus.hidden = false;
-    elements.ocrStatus.textContent = "附近扫描已用于估算";
-    return;
-  }
+  const orderedNearby = nearbyPageNumbers(centerPage);
+  const pages = [
+    ...(priorityPage ? [priorityPage] : []),
+    ...orderedNearby,
+  ].filter((pageNumber, index, list) => (
+    Number.isInteger(pageNumber) &&
+    pageNumber >= 1 &&
+    pageNumber <= pageCount &&
+    list.indexOf(pageNumber) === index &&
+    ocrTaskByPage.get(pageNumber)?.request === request &&
+    (
+      nativeTextAssessments.get(pageNumber)?.state !== "ready" ||
+      ocrTaskByPage.get(pageNumber)?.manualEnhancement === true
+    )
+  ));
 
   const controller = new AbortController();
   ocrAbortController = controller;
   elements.ocrStatus.hidden = false;
+  let activeOcrPage = null;
 
   try {
     for (let index = 0; index < pages.length; index += 1) {
       if (
         controller.signal.aborted ||
-        !ocrEnabled ||
+        !ocrWorkloadActive ||
         request !== ocrScanRequest ||
         generation !== loadGeneration
       ) {
         break;
       }
       const pageNumber = pages[index];
+      const pageTask = ocrTaskByPage.get(pageNumber);
+      if (
+        nativeTextAssessments.get(pageNumber)?.state === "ready" &&
+        pageTask?.manualEnhancement !== true
+      ) {
+        ocrTaskByPage.delete(pageNumber);
+        reconcilePageTextSource(pageNumber);
+        continue;
+      }
+      activeOcrPage = pageNumber;
+      ocrTaskByPage.set(pageNumber, {
+        ...pageTask,
+        request,
+        status: "running",
+      });
+      reconcilePageTextSource(pageNumber);
       ocrProgressPosition = { index: index + 1, total: pages.length };
-      elements.ocrStatus.textContent = `正在扫描附近页 ${index + 1}/${pages.length}`;
+      elements.ocrStatus.textContent = pageNumber === priorityPage
+        ? `正在扫描当前页 ${index + 1}/${pages.length}`
+        : `正在扫描附近页 ${index + 1}/${pages.length}`;
       const result = await ocrProvider.recognizePage({
         pdf: activePdf,
         pageNumber,
         signal: controller.signal,
+        documentLabel: activeFileMeta?.fileName ?? elements.documentName.textContent ?? "",
       });
-      const text = typeof result === "string" ? result : result?.text;
-      cacheOcrPageText(pageNumber, text, generation);
+      cacheOcrPageText(pageNumber, result, generation, request);
+      activeOcrPage = null;
     }
     if (
       !controller.signal.aborted &&
-      ocrEnabled &&
+      ocrWorkloadActive &&
       request === ocrScanRequest &&
       generation === loadGeneration
     ) {
@@ -1433,11 +3118,17 @@ async function runNearbyOcr(centerPage, generation, request) {
   } catch (error) {
     if (
       error?.name !== "AbortError" &&
-      ocrEnabled &&
+      ocrWorkloadActive &&
       request === ocrScanRequest &&
       generation === loadGeneration
     ) {
-      ocrFailed = true;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      ocrLastError = errorMessage;
+      if (activeOcrPage) {
+        ocrFailureByPage.set(activeOcrPage, errorMessage);
+        ocrTaskByPage.delete(activeOcrPage);
+        reconcilePageTextSource(activeOcrPage);
+      }
       elements.ocrStatus.textContent = "扫描未完成，可以重试";
       updateOcrControls();
     }
@@ -1445,66 +3136,122 @@ async function runNearbyOcr(centerPage, generation, request) {
     if (ocrAbortController === controller) {
       ocrAbortController = null;
     }
+    for (const [pageNumber, task] of ocrTaskByPage) {
+      if (task.request !== request) continue;
+      ocrTaskByPage.delete(pageNumber);
+      reconcilePageTextSource(pageNumber);
+    }
+    if (request === ocrScanRequest) {
+      ocrWorkloadActive = false;
+      updateRenderBudget();
+      updateOcrControls();
+      updateCurrentTextSourceStatus();
+    }
     ocrProgressPosition = null;
     publishDiagnostics();
   }
 }
 
-function scheduleNearbyOcr(centerPage = activeReadingPage) {
-  if (!ocrEnabled || !ocrProvider || !activePdf || !centerPage) return;
-  ocrFailed = false;
-  updateOcrControls();
+function scheduleNearbyOcr(
+  centerPage = activeReadingPage,
+  { priorityPage = 0, manualRetry = false } = {},
+) {
+  if (!ocrProvider || !activePdf || !centerPage) return false;
+  const requestedPriorityPage = priorityPage || centerPage;
+  const pages = [
+    requestedPriorityPage,
+    ...nearbyPageNumbers(centerPage),
+  ].filter((pageNumber, index, list) => {
+    if (
+      !Number.isInteger(pageNumber) ||
+      pageNumber < 1 ||
+      pageNumber > pageCount ||
+      list.indexOf(pageNumber) !== index ||
+      !nativeTextAssessments.has(pageNumber)
+    ) {
+      return false;
+    }
+    const isManualPriority = (
+      manualRetry &&
+      pageNumber === requestedPriorityPage
+    );
+    if (
+      nativeTextAssessments.get(pageNumber)?.state === "ready" &&
+      !isManualPriority
+    ) {
+      return false;
+    }
+    if (manualRetry) {
+      return (
+        isManualPriority ||
+        !ocrTextAssessments.has(pageNumber) ||
+        ocrTextAssessments.get(pageNumber)?.state !== "ready" ||
+        ocrFailureByPage.has(pageNumber)
+      );
+    }
+    return (
+      !ocrTextAssessments.has(pageNumber) &&
+      !ocrFailureByPage.has(pageNumber)
+    );
+  });
+  if (!pages.length) {
+    updateCurrentTextSourceStatus();
+    updateOcrControls();
+    return false;
+  }
+
   const generation = loadGeneration;
-  const request = ++ocrScanRequest;
-  const hasActiveScan = Boolean(ocrAbortController);
+  const request = ocrScanRequest + 1;
+  const scheduled = ocrTaskScheduler.schedule({
+    centerPage,
+    priorityPage: requestedPriorityPage,
+    generation,
+    request,
+  });
+  if (scheduled.reused) return false;
+
+  for (const [pageNumber] of ocrTaskByPage) {
+    ocrTaskByPage.delete(pageNumber);
+    reconcilePageTextSource(pageNumber);
+  }
+  if (manualRetry) {
+    for (const pageNumber of pages) {
+      ocrTextCache.delete(pageNumber);
+      ocrReadableChunkCache.delete(pageNumber);
+      if (ocrParagraphPassageCache.delete(pageNumber)) {
+        bumpParagraphPassageRevision(pageNumber, "ocr");
+      }
+      ocrTextAssessments.delete(pageNumber);
+      ocrFailureByPage.delete(pageNumber);
+    }
+  }
+  ocrScanRequest = request;
+  ocrLastError = null;
+  ocrWorkloadActive = true;
+  for (const pageNumber of pages) {
+    ocrTaskByPage.set(pageNumber, {
+      request,
+      status: "scheduled",
+      manualEnhancement: (
+        manualRetry &&
+        pageNumber === requestedPriorityPage &&
+        nativeTextAssessments.get(pageNumber)?.state === "ready"
+      ),
+    });
+    reconcilePageTextSource(pageNumber);
+  }
+  updateOcrControls();
+  updateRenderBudget();
+  const hasActiveScan = Boolean(
+    ocrAbortController &&
+    !ocrAbortController.signal.aborted
+  );
   ocrAbortController?.abort();
   if (hasActiveScan) void ocrProvider.cancel?.();
-  window.clearTimeout(ocrScheduleTimer);
-  ocrScheduleTimer = window.setTimeout(() => {
-    ocrScheduleTimer = 0;
-    if (
-      !ocrEnabled ||
-      request !== ocrScanRequest ||
-      generation !== loadGeneration
-    ) {
-      return;
-    }
-    ocrRunChain = ocrRunChain
-      .catch(() => {})
-      .then(() => runNearbyOcr(centerPage, generation, request));
-  }, 180);
-}
-
-function disableOcr() {
-  ocrEnabled = false;
-  ocrFailed = false;
-  ocrScanRequest += 1;
-  window.clearTimeout(ocrScheduleTimer);
-  ocrScheduleTimer = 0;
-  ocrAbortController?.abort();
-  ocrAbortController = null;
-  ocrProgressPosition = null;
-  void ocrProvider?.reset?.();
-  elements.ocrStatus.hidden = true;
-  lastEstimateSignature = "";
-  renderSpeedEstimate("density");
-  updateOcrControls();
-  updateRenderBudget();
-  publishDiagnostics();
-}
-
-function enableOcr() {
-  if (!ocrProvider || !activePdf) return;
-  ocrEnabled = true;
-  ocrFailed = false;
-  lastEstimateSignature = "";
-  renderSpeedEstimate("density");
-  updateOcrControls();
-  updateRenderBudget();
   elements.ocrStatus.hidden = false;
   elements.ocrStatus.textContent = "正在准备本地扫描模型";
-  scheduleNearbyOcr();
   publishDiagnostics();
+  return true;
 }
 
 window.pdfFlowReaderOcr = Object.freeze({
@@ -1515,14 +3262,24 @@ window.pdfFlowReaderOcr = Object.freeze({
     pageNumber: activeReadingPage,
     nearbyPages: nearbyPageNumbers(activeReadingPage),
     pdf: activePdf,
-    enabled: ocrEnabled,
+    workloadActive: ocrWorkloadActive,
+    state: textSourceStateForPage(activeReadingPage),
+    nativeAssessment: nativeTextAssessments.get(activeReadingPage) ?? null,
+    ocrAssessment: ocrTextAssessments.get(activeReadingPage) ?? null,
   }),
 });
 
 elements.ocrButton.addEventListener("click", () => {
-  if (ocrEnabled && ocrFailed) scheduleNearbyOcr();
-  else if (ocrEnabled) disableOcr();
-  else enableOcr();
+  scheduleNearbyOcr(activeReadingPage, {
+    priorityPage: activeReadingPage,
+    manualRetry: true,
+  });
+});
+
+elements.ttsDiagnosticsClose?.addEventListener("click", () => toggleTtsDiagnosticsPanel(false));
+elements.ttsDiagnosticsSelfTest?.addEventListener("click", () => {
+  elements.ttsDiagnosticsOutput.textContent = "正在运行本地语音自检…";
+  void runTtsSelfTest();
 });
 
 registerOcrProvider(
@@ -1613,6 +3370,46 @@ elements.viewport.addEventListener("scroll", () => updateReadingStatus(true), {
   passive: true,
 });
 
+elements.viewport.addEventListener("wheel", () => {
+  interruptPointReadForUser("user-scroll");
+}, { passive: true });
+
+elements.viewport.addEventListener("touchstart", () => {
+  interruptPointReadForUser("touch-scroll");
+}, { passive: true });
+
+elements.viewport.addEventListener("pointerdown", (event) => {
+  if (event.target === elements.viewport) {
+    interruptPointReadForUser("scrollbar-drag");
+  }
+}, { capture: true });
+
+elements.pages.addEventListener("pointermove", (event) => {
+  movePointReadGesture(event);
+  updatePointReadHover(event);
+}, { passive: true });
+
+elements.pages.addEventListener("pointerdown", beginPointReadGesture);
+elements.pages.addEventListener("pointerup", finishPointReadGesture);
+elements.pages.addEventListener("pointercancel", () => {
+  pointReadGesture = null;
+});
+
+elements.pages.addEventListener("pointerleave", () => {
+  if (!pointReadIsActive()) clearPointReadHighlight();
+});
+
+document.addEventListener("selectionchange", () => {
+  const selection = window.getSelection?.();
+  if (!selection || selection.isCollapsed || !pointReadIsActive()) return;
+  const anchor = selection.anchorNode instanceof Element
+    ? selection.anchorNode
+    : selection.anchorNode?.parentElement;
+  if (anchor?.closest?.(".point-read-text-layer")) {
+    interruptPointReadForUser("text-selection");
+  }
+});
+
 elements.viewport.addEventListener("click", (event) => {
   if (isBackgroundClick(event)) togglePatternMode();
 });
@@ -1623,9 +3420,41 @@ window.addEventListener("resize", () => {
 });
 
 window.addEventListener("keydown", (event) => {
-  if (event.code !== "Space" || event.target instanceof HTMLInputElement) return;
-  event.preventDefault();
-  elements.toggle.click();
+  if (event.target instanceof HTMLInputElement) return;
+  if ([
+    "ArrowUp",
+    "ArrowDown",
+    "PageUp",
+    "PageDown",
+    "Home",
+    "End",
+  ].includes(event.code)) {
+    interruptPointReadForUser("keyboard-scroll");
+  }
+  if (event.code === "Space") {
+    event.preventDefault();
+    elements.toggle.click();
+    return;
+  }
+  if (event.code === "KeyH") {
+    event.preventDefault();
+    toggleTtsEnabled();
+    return;
+  }
+  if (event.code === "KeyR") {
+    event.preventDefault();
+    void requestLineSpeech();
+    return;
+  }
+  if (event.code === "KeyD") {
+    event.preventDefault();
+    toggleTtsDiagnosticsPanel();
+    return;
+  }
+  if (event.code === "Escape") {
+    cancelSpeechSession("manual-stop");
+    return;
+  }
 });
 
 window.addEventListener("beforeunload", () => {
@@ -1634,7 +3463,8 @@ window.addEventListener("beforeunload", () => {
 
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
-    wasPlayingBeforeHidden = playing;
+    const pointInterrupted = interruptPointReadForUser("document-hidden");
+    wasPlayingBeforeHidden = pointInterrupted ? false : playing;
   } else if (wasPlayingBeforeHidden && readyToMove) {
     setPlaying(true);
   }

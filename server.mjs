@@ -5,6 +5,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { parseByteRange } from "./http-range.mjs";
+import { createTtsRuntimeRouter } from "./tts-runtime-router.mjs";
 
 const modulePath = fileURLToPath(import.meta.url);
 const defaultAppRoot = dirname(modulePath);
@@ -15,17 +16,37 @@ function createStaticFiles(appRoot) {
     ["/index.html", [join(appRoot, "index.html"), "text/html; charset=utf-8"]],
     ["/styles.css", [join(appRoot, "styles.css"), "text/css; charset=utf-8"]],
     ["/app.mjs", [join(appRoot, "app.mjs"), "text/javascript; charset=utf-8"]],
+    ["/chunk-coordinate.mjs", [join(appRoot, "chunk-coordinate.mjs"), "text/javascript; charset=utf-8"]],
     ["/http-range.mjs", [join(appRoot, "http-range.mjs"), "text/javascript; charset=utf-8"]],
     ["/pdf-source.mjs", [join(appRoot, "pdf-source.mjs"), "text/javascript; charset=utf-8"]],
     ["/page-layout.mjs", [join(appRoot, "page-layout.mjs"), "text/javascript; charset=utf-8"]],
     ["/render-scheduler.mjs", [join(appRoot, "render-scheduler.mjs"), "text/javascript; charset=utf-8"]],
     ["/ocr-provider.mjs", [join(appRoot, "ocr-provider.mjs"), "text/javascript; charset=utf-8"]],
+    ["/ocr-schedule.mjs", [join(appRoot, "ocr-schedule.mjs"), "text/javascript; charset=utf-8"]],
+    ["/ocr-segment-adapter.mjs", [join(appRoot, "ocr-segment-adapter.mjs"), "text/javascript; charset=utf-8"]],
     ["/reading-model.mjs", [join(appRoot, "reading-model.mjs"), "text/javascript; charset=utf-8"]],
     ["/reading-rhythm.mjs", [join(appRoot, "reading-rhythm.mjs"), "text/javascript; charset=utf-8"]],
     ["/reading-clock.mjs", [join(appRoot, "reading-clock.mjs"), "text/javascript; charset=utf-8"]],
+    ["/readable-chunk.mjs", [join(appRoot, "readable-chunk.mjs"), "text/javascript; charset=utf-8"]],
     ["/sound-engine.mjs", [join(appRoot, "sound-engine.mjs"), "text/javascript; charset=utf-8"]],
     ["/storage.mjs", [join(appRoot, "storage.mjs"), "text/javascript; charset=utf-8"]],
+    ["/text-cleaner.mjs", [join(appRoot, "text-cleaner.mjs"), "text/javascript; charset=utf-8"]],
     ["/text-segment.mjs", [join(appRoot, "text-segment.mjs"), "text/javascript; charset=utf-8"]],
+    ["/text-source-state.mjs", [join(appRoot, "text-source-state.mjs"), "text/javascript; charset=utf-8"]],
+    ["/tts-audio-player.mjs", [join(appRoot, "tts-audio-player.mjs"), "text/javascript; charset=utf-8"]],
+    ["/tts-aesthetic-walk.mjs", [join(appRoot, "tts-aesthetic-walk.mjs"), "text/javascript; charset=utf-8"]],
+    ["/tts-controller.mjs", [join(appRoot, "tts-controller.mjs"), "text/javascript; charset=utf-8"]],
+    ["/tts-model-manager.mjs", [join(appRoot, "tts-model-manager.mjs"), "text/javascript; charset=utf-8"]],
+    ["/tts-paragraph-flow.mjs", [join(appRoot, "tts-paragraph-flow.mjs"), "text/javascript; charset=utf-8"]],
+    ["/tts-policy.mjs", [join(appRoot, "tts-policy.mjs"), "text/javascript; charset=utf-8"]],
+    ["/tts-point-gesture.mjs", [join(appRoot, "tts-point-gesture.mjs"), "text/javascript; charset=utf-8"]],
+    ["/tts-point-sentence.mjs", [join(appRoot, "tts-point-sentence.mjs"), "text/javascript; charset=utf-8"]],
+    ["/tts-point-session.mjs", [join(appRoot, "tts-point-session.mjs"), "text/javascript; charset=utf-8"]],
+    ["/tts-preferences.mjs", [join(appRoot, "tts-preferences.mjs"), "text/javascript; charset=utf-8"]],
+    ["/tts-provider.mjs", [join(appRoot, "tts-provider.mjs"), "text/javascript; charset=utf-8"]],
+    ["/tts-scheduler.mjs", [join(appRoot, "tts-scheduler.mjs"), "text/javascript; charset=utf-8"]],
+    ["/tts-sentence.mjs", [join(appRoot, "tts-sentence.mjs"), "text/javascript; charset=utf-8"]],
+    ["/tts-segment-picker.mjs", [join(appRoot, "tts-segment-picker.mjs"), "text/javascript; charset=utf-8"]],
     ["/build/rhythm-motifs/snow-mist.svg", [join(appRoot, "build", "rhythm-motifs", "snow-mist.svg"), "image/svg+xml"]],
     ["/build/rhythm-motifs/aesthetic-walk.svg", [join(appRoot, "build", "rhythm-motifs", "aesthetic-walk.svg"), "image/svg+xml"]],
     ["/build/rhythm-motifs/long-day.svg", [join(appRoot, "build", "rhythm-motifs", "long-day.svg"), "image/svg+xml"]],
@@ -195,10 +216,141 @@ function sendJson(request, response, value) {
   else response.end(body);
 }
 
+const KOKORO_SAFE_VOICES = new Set([
+  "af_heart", "af_alloy", "af_aoede", "af_bella", "af_jessica", "af_kore", "af_nicole", "af_nova", "af_river", "af_sarah", "af_sky",
+  "am_adam", "am_echo", "am_eric", "am_fenrir", "am_liam", "am_michael", "am_onyx", "am_puck", "am_santa",
+  "bf_emma", "bf_isabella", "bm_george", "bm_lewis", "bf_alice", "bf_lily", "bm_daniel", "bm_fable",
+  "zf_xiaobei", "jf_alpha",
+]);
+
+function safeKokoroVoice(voice) {
+  const normalized = String(voice ?? "af_heart").trim();
+  return KOKORO_SAFE_VOICES.has(normalized) ? normalized : "af_heart";
+}
+
+function readRequestBody(request, maxBytes = 64_000) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let total = 0;
+    request.on("data", (chunk) => {
+      total += chunk.byteLength;
+      if (total > maxBytes) {
+        reject(new Error("TTS 请求过大"));
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    request.on("error", reject);
+  });
+}
+
+async function handleKokoroTts(request, response, ttsRuntime) {
+  if (request.method === "GET" || request.method === "HEAD") {
+    sendJson(request, response, {
+      provider: "kokoro-local",
+      model: "language-routed-kokoro-onnx",
+      models: {
+        en: "onnx-community/Kokoro-82M-ONNX",
+        zh: "kokoro-v1.0.int8.onnx",
+        ja: "kokoro-v1.0.int8.onnx",
+      },
+      dtype: "q8",
+      status: ttsRuntime.status(),
+    });
+    return;
+  }
+  if (request.method !== "POST") {
+    response.writeHead(405, {
+      Allow: "GET, HEAD, POST",
+      "Content-Type": "text/plain; charset=utf-8",
+    });
+    response.end("只支持 TTS 查询或合成请求");
+    return;
+  }
+
+  const controller = new AbortController();
+  let finished = false;
+  const abortInference = () => {
+    if (!finished) controller.abort();
+  };
+  const abortOnClosedResponse = () => {
+    if (!response.writableEnded) abortInference();
+  };
+  request.once("aborted", abortInference);
+  response.once("close", abortOnClosedResponse);
+
+  try {
+    const raw = await readRequestBody(request);
+    const payload = JSON.parse(raw || "{}");
+    const text = String(payload.text ?? "").trim();
+    const language = String(payload.language ?? "").trim() || null;
+    const voice = safeKokoroVoice(payload.voice ?? "af_heart");
+    const requestedSpeed = Number(payload.speed ?? 1);
+    const ttsSpeed = Number.isFinite(requestedSpeed)
+      ? Math.max(0.9, Math.min(1.85, requestedSpeed))
+      : 1.15;
+    if (!text) {
+      response.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+      response.end("缺少需要朗读的文本");
+      return;
+    }
+
+    const result = await ttsRuntime.synthesize(
+      {
+        text,
+        language,
+        voice,
+        speed: ttsSpeed,
+        generation: payload.generation ?? null,
+        warmup: payload.warmup === true,
+      },
+      { signal: controller.signal },
+    );
+    if (controller.signal.aborted || response.destroyed || response.writableEnded) return;
+    const body = result.audio;
+    const actualVoice = result.voice ?? voice;
+    const actualSpeed = Number.isFinite(result.speed) ? result.speed : ttsSpeed;
+    const actualLanguage = result.language ?? language ?? "unknown";
+
+    response.writeHead(200, {
+      "Content-Type": "audio/wav",
+      "Content-Length": body.byteLength,
+      "Cache-Control": "no-store",
+      "X-TTS-Provider": "kokoro-local",
+      "X-TTS-Voice": actualVoice,
+      "X-TTS-Language": actualLanguage,
+      "X-TTS-Model": result.model ?? "onnx-community/Kokoro-82M-ONNX",
+      "X-TTS-Dtype": result.dtype ?? "q8",
+      "X-TTS-Speed": String(actualSpeed),
+      "X-TTS-Duration-Ms": String(result.durationMs),
+      "X-TTS-Sample-Rate": String(result.sampleRate),
+      "X-TTS-Unknown-Phonemes": String(result.unknownPhonemeCount ?? 0),
+    });
+    response.end(body);
+  } catch (error) {
+    if (
+      controller.signal.aborted
+      || error?.name === "AbortError"
+      || response.destroyed
+      || response.writableEnded
+    ) return;
+    const status = error?.code === "TTS_TIMEOUT" ? 504 : 500;
+    response.writeHead(status, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+    response.end(error instanceof Error ? error.message : String(error));
+  } finally {
+    finished = true;
+    request.removeListener("aborted", abortInference);
+    response.removeListener("close", abortOnClosedResponse);
+  }
+}
+
 export function createReaderServer({
   pdfPath = null,
   appRoot = defaultAppRoot,
   systemMemoryBytes = totalmem(),
+  ttsRuntime = createTtsRuntimeRouter({ appRoot }),
 } = {}) {
   const resolvedPdfPath = pdfPath ? resolve(pdfPath) : null;
   const staticFiles = createStaticFiles(appRoot);
@@ -211,8 +363,14 @@ export function createReaderServer({
     abortedStreams: 0,
   };
 
-  return createServer((request, response) => {
+  const server = createServer((request, response) => {
     setCommonHeaders(response);
+
+    const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    if (url.pathname === "/tts/kokoro") {
+      void handleKokoroTts(request, response, ttsRuntime);
+      return;
+    }
 
     if (request.method !== "GET" && request.method !== "HEAD") {
       response.writeHead(405, {
@@ -223,7 +381,6 @@ export function createReaderServer({
       return;
     }
 
-    const url = new URL(request.url ?? "/", "http://127.0.0.1");
     if (url.pathname === "/document.pdf") {
       if (!resolvedPdfPath) {
         response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
@@ -291,14 +448,53 @@ export function createReaderServer({
     response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     response.end(request.method === "HEAD" ? undefined : "没有这个页面");
   });
+  let ttsRuntimeClosed = false;
+  const closeTtsRuntime = () => {
+    if (ttsRuntimeClosed) return;
+    ttsRuntimeClosed = true;
+    ttsRuntime.close?.();
+  };
+  const closeHttpServer = server.close.bind(server);
+  server.close = (callback) => {
+    closeTtsRuntime();
+    const result = closeHttpServer(callback);
+    server.closeAllConnections?.();
+    return result;
+  };
+  server.once("close", closeTtsRuntime);
+  return server;
+}
+
+export function parseReaderCliArgs(cliArgs = []) {
+  const startsWithPortFlag = cliArgs[0] === "--port-file";
+  const idleMsIndex = cliArgs.indexOf("--idle-ms");
+  const idleMs = idleMsIndex >= 0 ? Number(cliArgs[idleMsIndex + 1]) : 0;
+  const positionalArgs = cliArgs.filter((arg, index) => {
+    if (
+      idleMsIndex >= 0 &&
+      (index === idleMsIndex || index === idleMsIndex + 1)
+    ) {
+      return false;
+    }
+    return true;
+  });
+  const requestedPdf = startsWithPortFlag ? positionalArgs[2] : positionalArgs[0];
+  const portFile = positionalArgs[1];
+  return {
+    idleMs,
+    pdfPath: requestedPdf ? resolve(requestedPdf) : null,
+    portFile,
+    startsWithPortFlag,
+  };
 }
 
 function startCli() {
-  const cliArgs = process.argv.slice(2);
-  const startsWithPortFlag = cliArgs[0] === "--port-file";
-  const requestedPdf = startsWithPortFlag ? cliArgs[2] : cliArgs[0];
-  const portFile = cliArgs[1];
-  const pdfPath = requestedPdf ? resolve(requestedPdf) : null;
+  const {
+    idleMs,
+    pdfPath,
+    portFile,
+    startsWithPortFlag,
+  } = parseReaderCliArgs(process.argv.slice(2));
 
   if (startsWithPortFlag && !portFile) {
     console.error("缺少 --port-file 的路径。");
@@ -329,12 +525,15 @@ function startCli() {
     console.log(`夜晚的书斋已启动：http://127.0.0.1:${address.port}/`);
   });
 
-  const idleTimer = setInterval(() => {
-    if (Date.now() - lastSeen > 150_000) {
-      clearInterval(idleTimer);
-      server.close(() => process.exit(0));
-    }
-  }, 30_000);
+  const idleTimer = Number.isFinite(idleMs) && idleMs > 0
+    ? setInterval(() => {
+        if (Date.now() - lastSeen > idleMs) {
+          clearInterval(idleTimer);
+          server.close(() => process.exit(0));
+        }
+      }, Math.min(30_000, Math.max(1000, idleMs)))
+    : null;
+  idleTimer?.unref?.();
 
   function cleanPortFile() {
     if (!portFile || !existsSync(portFile)) return;

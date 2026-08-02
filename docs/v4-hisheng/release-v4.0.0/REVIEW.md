@@ -1,20 +1,23 @@
-# v4.0.0 发布复核
+# v4.0.0 发布验证
 
-状态：本地候选包通过；等待跨平台 CI 与 GitHub Release 证据。
+状态：发布流水线与 Release 资产均已完成。
 
-## 已通过
+## 已验证
 
-- 计划符合性：产物、平台、模型、非目标与 `PLAN.md` 一致。
-- 许可边界：正式 CJK runtime 不含 `phonemizer-fork`、eSpeak、`kokoro-onnx`；可分发依赖和 PyInstaller Bootloader Exception 已记入第三方声明。
-- 回归：`npm test` 通过 289/289；Python worker 通过 5/5。
-- 真实模型：打包后中英混排、日英混排和纯英文均产生 24 kHz mono PCM16 WAV。
-- 取消语义：打包后的 CJK worker 在 AbortSignal 后被硬终止，随后请求可以重建并生成音频。
-- 打包完整性：自包含 CJK worker、英文模型、日文字典；未夹带内部发布文档、临时 runtime 构建树、`onnxruntime-web`、Transformers 开发源码或多余声音。
-- macOS 候选包：392,989,571 bytes，SHA-256 `d2771f0da4a6de263cfc12c0393c3c668b16aed7901e7ceec8a5bb62de1731ab`。
-- 用户文件保护：`docs/COMPETITOR_RESEARCH_SPIEL_LOCAL_TTS_2026-07-25.md` 仍为未暂存的用户改动，明确排除于发布提交与远端上传。
+- 构建产物、平台和模型与发布契约一致。
+- CJK runtime 不包含 `phonemizer-fork`、eSpeak 或 `kokoro-onnx`。
+- Node 回归 289 项通过，Python worker 回归 5 项通过。
+- 包内中英混排、日英混排和纯英文均生成 24 kHz mono PCM16 WAV。
+- 活动 CJK 推理可以硬取消，后续请求能重建 worker。
+- 桌面包包含 CJK worker、英文模型和日文字典。
+- macOS 与 Windows 在各自 GitHub Actions runner 上完成构建与冒烟测试。
+- Release 同时包含 macOS zip、Windows portable exe 和 `SHA256SUMS.txt`。
 
-## 尚待远程验收
+## 许可与运行边界
 
-- GitHub Actions 上 macOS Apple Silicon 与 Windows x64 均重建 runtime、重跑测试和包内 smoke。
-- PR #1 通过后合并，`v4.0.0` tag 只指向已验收的 `main`。
-- Release 必须同时含 macOS zip、Windows portable exe 和 `SHA256SUMS.txt`，且校验和附件一致。
+- 可分发依赖与 PyInstaller Bootloader Exception 已记录在第三方声明中。
+- 模型通过固定地址、大小和 SHA-256 约束。
+- 英文运行时禁止远端模型回退。
+- 当前发布包未签名，也未进行 macOS 公证或 Windows Authenticode 签名。
+
+最终资产与校验值以 GitHub Release 页面为准。

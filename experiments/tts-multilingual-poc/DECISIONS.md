@@ -2,7 +2,7 @@
 
 ## 2026-07-31：采用方案 A
 
-用户确认采用“现有英文链路 + Kokoro ONNX / Misaki 中日文链路”。先做隔离 PoC，通过后再讨论接入。
+采用“现有英文链路 + Kokoro ONNX / Misaki 中日文链路”。先做隔离 PoC，通过后再讨论正式接入。
 
 ## 模型选择
 
@@ -37,8 +37,8 @@ PoC 使用持久 Python child process，并由 Node 父进程拥有其生命周�
 
 ## 2026-07-31：为 eSpeak 建立 ASCII shadow path
 
-`espeakng-loader==0.2.4` 的 macOS 动态库在含中文字符的工程路径下无法加载 `phontab`，并回退到发布者构建机路径后退出。实测将同一数据目录软链接到 ASCII 临时目录、把该临时目录传给 `espeak_Initialize` 后即可正常初始化。worker 启动时自动创建这个隔离 shadow path；用户无需移动项目，也不依赖系统级 eSpeak。
+`espeakng-loader==0.2.4` 的 macOS 动态库在非 ASCII 工程路径下无法加载 `phontab`，并回退到发布者构建机路径后退出。将同一数据目录软链接到 ASCII 临时目录、把该目录传给 `espeak_Initialize` 后可以正常初始化。worker 启动时自动创建隔离 shadow path，不要求移动项目，也不依赖系统级 eSpeak。
 
-## 2026-07-31：用户选择中文 v1.0
+## 2026-07-31：正式集成选择中文 v1.0
 
-用户试听后明确选择“中文 v1.0”。正式接入采用 `kokoro-v1.0.int8.onnx`、`voices-v1.0.bin` 与 `zf_xiaobei`；日文继续使用同一模型与 `jf_alpha`。这保留 1.0–1.85x 的连续速度控制，并把中日文模型资产从 v1.1 + v1.0 的约 494 MiB 降为共用 v1.0 的约 115 MiB。v1.1 中文三件套不进入正式接线和后续分发范围。
+对照结果确定采用 `kokoro-v1.0.int8.onnx`、`voices-v1.0.bin` 与 `zf_xiaobei`；日文继续使用同一模型与 `jf_alpha`。这一组合保留 1.0–1.85x 的连续速度控制，并把中日文模型资产从 v1.1 + v1.0 的约 494 MiB 降为共用 v1.0 的约 115 MiB。v1.1 中文三件套不进入正式接线和后续分发范围。

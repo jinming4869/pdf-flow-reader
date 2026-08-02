@@ -1,200 +1,78 @@
-# 夜晚的书斋 v4.0「希声」执行记录
+# v4「希声」实现说明
 
-> 状态说明（2026-07-25）：本文是 ReadableChunk、native text 和 OCR 结构化阶段的早期日志。后续 TTS 原型状态见 `ENGINEERING_LOG_v4.0_HISHENG_PHASE1.md`，当前计划见根目录 `PLAN.md`。
+本文概述 v4 的文本、OCR、朗读控制与桌面打包实现。
 
-## 2026-07-24：P0 ReadableChunk 地基
+## 文本模型
 
-本轮先实现 TTS 之前的文本结构层，不接 TTS 模型，不改 UI。
+所有可朗读内容先归一化为 `TextSegment`，再组合为 `ReadableChunk`。结构保留：
 
-### 新增模块
+- 页码与来源类型
+- 原始与归一化坐标
+- 语言提示
+- 段落与句子身份
+- 正文、页边、脚注等角色
+- OCR 置信度与质量状态
 
-- `text-cleaner.mjs`
-  - 修复 PDF ligature：`ﬁ`、`ﬂ` 等。
-  - 修复断词：如 `democ- racy` → `democracy`。
-  - 修复所有格空格：如 `Goertz’ s` → `Goertz’s`。
-  - 过滤 Goertz 类 PDF 生产页眉：`October 20, 2005 ... Sheet number ... Page number ...`。
-  - 识别页码、装饰符、重复 running header。
+统一结构让原生 PDF 文字与 OCR 结果可以共用阅读线、段落流和点句逻辑。
 
-- `readable-chunk.mjs`
-  - 将 `TextSegment[]` 聚合为行。
-  - 基础双栏排序：左栏从上到下，再右栏从上到下。
-  - 过滤 running header / page number。
-  - 合并为适合 TTS 的 `ReadableChunk[]`。
-  - 为 chunk 附带 `bbox`、`yStart/yEnd`、`languageHint`、`role`、`priority`。
+## 原生文字优先
 
-### 新增测试
+页面首先评估 PDF.js 文字层：
 
-- `tests/text-cleaner.test.mjs`
-- `tests/readable-chunk.test.mjs`
+1. 文字为空时标记为需要 OCR。
+2. 文字存在但噪声、表格或目录比例过高时，不直接用于朗读。
+3. 正文形态稳定时直接开放朗读，不启动 OCR。
+4. 手动扫描可以改善速度估算，但不会无条件覆盖更好的原生文字。
 
-覆盖：
+## OCR 接线
 
-- ligature 修复。
-- Goertz 类页眉过滤。
-- 断词修复。
-- running header 识别。
-- TextSegment 聚合为行。
-- 英文 TTS chunk 合并。
-- 基础双栏阅读顺序。
+OCR 使用本地 Tesseract.js 资源。调度器负责：
 
-### 打包与静态服务
+- 当前页附近有限窗口
+- 防抖任务身份
+- 同页 pending 复用
+- 换页和换文档取消
+- 已失败或低质量页面避免自动循环
+- 阅读方向上的前向补扫
 
-已将以下文件加入 Electron 打包清单与本地静态路由：
+识别结果从 block、paragraph、line 和 word 恢复坐标。中文与日文点句偏向稳定行框，英文保留更精确的词框。
 
-- `text-cleaner.mjs`
-- `readable-chunk.mjs`
+## 可读块与段落
 
-## 2026-07-25：P0 Native textContent diagnostics
+文本清理会：
 
-本轮将 `ReadableChunk` 接入真实 PDF.js native textContent 链路，但仍然不触发 TTS、不改阅读 UI。
+- 修复常见连字符与排版字符
+- 过滤重复页眉页脚
+- 识别双栏顺序和中缝
+- 降低脚注、URL、公式和表格优先级
+- 保守推断自然段与跨页连续关系
 
-### 接入点
+段落身份用于“流觞曲水”的段首预备和段尾触发；句子结构用于阅读线单句与最高两档点句。
 
-- `app.mjs` 现在在 `extractPageTextStats()` 中同时完成：
-  - PDF.js `page.getTextContent()` → 阅读速度 stats。
-  - PDF.js `textContent.items` → `TextSegment[]`。
-  - `TextSegment[]` → `ReadableChunk[]`。
-- 新增 `pageReadableChunkCache`，按页缓存 native chunks。
-- 当前页附近文本 stats 刷新时，同步刷新 chunk diagnostics。
+## 朗读控制
 
-### Diagnostics
+`TtsController`、scheduler 与音频播放器分别负责策略、合成时序和播放。统一取消入口会：
 
-`window.__pdfFlowDiagnostics.snapshot()` 现在会包含：
+- 停止当前音频
+- 清除播放锁
+- 使在途请求 generation 失效
+- 丢弃旧预取或段首准备
+- 中止本地请求
+- 必要时终止活动 worker
 
-```js
-readableChunks: {
-  source: "native-text",
-  cachedPages,
-  currentPage,
-  nearby: [
-    {
-      pageNumber,
-      ready,
-      count,
-      preview: [
-        { chunkIndex, role, languageHint, yStart, yEnd, text }
-      ]
-    }
-  ]
-}
-```
+## 运行时路由
 
-为了避免 diagnostics 过重，每页只展示前 5 个 chunk，单条文本会截断到 160 字符以内。
+英文与中日文使用不同本地运行时。混排文本先分段，再按语言发送，最后校验采样率并拼接 PCM16 WAV。
 
-### 静态路由测试
+模型资源必须从打包目录或显式本地路径发现；正式运行不允许静默回退到远程下载。
 
-- `tests/server-range.test.mjs` 已覆盖 `/readable-chunk.mjs` 静态资源 HEAD 请求。
+## 桌面打包
 
-## 2026-07-25：P0 OCR segment adapter
+Electron 构建显式包含前端模块、PDF/OCR 资源、声音、模型运行时和第三方许可。打包后测试检查：
 
-本轮将现有 OCR 管线从“只返回纯文本”升级为“返回文本 + words/lines bbox”，并接入 `ReadableChunk` 缓存。仍然不触发 TTS、不改阅读 UI。
+- 模型与 worker 是否存在
+- 运行时能否启动
+- 中文、英文和日文是否生成有效 WAV
+- 禁止的实验依赖是否混入正式 CJK runtime
 
-### 新增模块
-
-- `ocr-segment-adapter.mjs`
-  - `normalizeOcrResult()`：兼容原始 Tesseract `result.data` 与 provider 包装后的结构。
-  - `bboxFromOcrBox()`：兼容 `x0/y0/x1/y1` 与 `left/top/width/height` 两类 bbox。
-  - `segmentsFromOcrResult()`：优先使用 OCR lines，缺失时 fallback 到 words，并生成 `TextSegment[]`。
-
-### OCR provider 结构化返回
-
-`createLocalOcrProvider().recognizePage()` 现在返回：
-
-```js
-{
-  text,
-  source: "ocr",
-  pageNumber,
-  languageSet,
-  pageDimensions: { width, height },
-  words,
-  lines
-}
-```
-
-旧逻辑仍兼容：调用方仍可通过 `result.text` 拿到纯文本。
-
-### App 接入
-
-- 新增 `ocrReadableChunkCache`。
-- `cacheOcrPageText()` 现在会：
-  - 用 `result.text` 更新 OCR 阅读速度估算。
-  - 用 `segmentsFromOcrResult()` 生成 OCR `TextSegment[]`。
-  - 用 `segmentsToReadableChunks()` 生成 OCR chunks。
-- diagnostics 会在 `ocrEnabled` 且某页已有 OCR chunks 时优先展示 OCR chunk preview，否则 fallback 到 native chunk preview。
-
-### 新增测试
-
-- `tests/ocr-segment-adapter.test.mjs`
-  - bbox 兼容。
-  - Tesseract 原始 result 与 provider-shaped result 兼容。
-  - lines 优先。
-  - words fallback。
-- `tests/server-range.test.mjs` 增加 `/ocr-segment-adapter.mjs` 静态资源 HEAD 测试。
-
-## 2026-07-25：P0 坐标归一化与 chunk 质量规则
-
-本轮提前处理“统一坐标尺度”，避免后续 `tts-segment-picker` 在 native PDF 坐标和 OCR canvas 坐标之间混乱。
-
-### 新增模块
-
-- `chunk-coordinate.mjs`
-  - `normalizePageDimensions()`：标准化页面宽高和坐标系统。
-  - `bboxToTopLeft()`：将 PDF bottom-left 坐标转换为 top-left 阅读坐标。
-  - `relativeBbox()`：生成页面相对坐标，范围为 `0–1`。
-  - `enrichChunkCoordinates()`：给 chunk 补充：
-    - `readingBbox`：统一 top-left 绝对坐标。
-    - `normalizedBbox`：统一页面相对坐标。
-    - `yStart/yEnd`：统一 top-left 阅读坐标。
-
-### Native / OCR 坐标接入
-
-- native PDF.js textContent：传入 `pageDimensions: { width, height, coordinateSystem: "pdf" }`。
-- OCR：传入 `pageDimensions: { width, height, coordinateSystem: "top-down" }`。
-- diagnostics chunk preview 增加：
-  - `normalizedYStart`
-  - `normalizedYEnd`
-
-后续 TTS picker 可以直接使用 `normalizedBbox.y` 和阅读线的页面相对位置进行匹配。
-
-### 质量规则增强
-
-`ReadableChunk` 现在新增：
-
-- `qualityFlags`
-- 更细的 `role`
-- 按 role 自动降低 `priority`
-
-新增/增强角色：
-
-```text
-body
-heading
-footnote
-reference
-formula
-table
-unknown
-```
-
-规则保持保守：先降权，不删除。这样后续 TTS 可以默认跳过低优先级 chunk，但 diagnostics 仍然能看到它们。
-
-### 新增测试
-
-- `tests/chunk-coordinate.test.mjs`
-  - PDF bottom-left → top-left 坐标转换。
-  - 页面相对坐标。
-  - 保留 source bbox，同时生成 reading bbox。
-- `tests/readable-chunk.test.mjs`
-  - PDF 坐标 chunk 的统一 yStart/yEnd。
-  - footnote / formula 降权与 quality flags。
-- `tests/server-range.test.mjs`
-  - `/chunk-coordinate.mjs` 静态资源测试。
-
-### 下一步
-
-P0 后续应继续补：
-
-1. 复杂页眉页脚的跨页统计。
-2. 用 Goertz PDF 实测 diagnostics 中的 nearby chunks 是否自然。
-3. 再开始接 TTS scheduler，但先只接 `NullTtsProvider`。
+当前实现细节与测试入口可从对应 `.mjs` 模块和 `tests/` 目录继续追踪。

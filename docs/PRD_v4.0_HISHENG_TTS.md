@@ -1,6 +1,6 @@
-# 夜晚的书斋 v4.0 PRD：希声
+# 夜晚的书斋 v4.0 PRD：希声（历史初稿）
 
-> 状态说明（2026-07-25）：本文保留 v4 的背景、原则和初版需求。第 5.1 节三态模式、第 5.3 节速度密度表与第 11 节开发顺序已被根目录 `DECISIONS.md` 和 `PLAN.md` 中的新六档契约覆盖；发生冲突时以后者为准。
+> **历史状态：部分失效。** 本文保留 v4 的产品背景、原则与早期需求。正文中的 MeloTTS / GPT-SoVITS 候选结论、在线 Provider 设计、三态模式、速度密度表、模型首次下载策略和开发顺序均未成为 v4.0.0 的最终实现。正式版本采用六档策略、英文 Kokoro q8、中日文 Kokoro v1.0 int8、自包含 CJK worker，并将模型随桌面包离线提供。当前事实以根目录 [`README.md`](../README.md)、[`CHANGELOG.md`](../CHANGELOG.md)、[`DECISIONS.md`](../DECISIONS.md) 和 [`v4-hisheng/`](./v4-hisheng/) 文档为准。
 
 更新时间：2026-07-24
 目标版本：v4.0.0

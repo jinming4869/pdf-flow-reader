@@ -105,17 +105,16 @@ native text 层碎裂/乱码/缺失 → 用 OCR
 - 是否有大比例不可见/异常符号。
 - OCR confidence 是否可接受。
 
-## Goertz PDF 暴露的问题
+## 英文书稿 PDF 暴露的问题
 
-在 Gary Goertz《Social Science Concepts》PDF 上，native text 能提取正文，但会出现：
+英文书籍型 PDF 的 native text 通常能提取正文，但可能混入：
 
 ```text
-October 20, 2005 14:31 nec100 Sheet number ...
-CHAPTER ONE / INTRODUCTION running header
-democ- racy
-ﬁ / ﬂ ligature
-beganhisSystem
-Goertz’ s
+排版软件时间戳与页码
+重复的章节页眉
+跨行断词
+ﬁ / ﬂ 等连字
+单词粘连或异常空格
 ```
 
 这说明 v4.0 需要一个 `ReadableChunkCleaner`：
@@ -172,7 +171,7 @@ native-segment-adapter / ocr-segment-adapter
 ## 验收点
 
 - 原生英文 PDF 不读页眉页脚。
-- Goertz 这种书稿 PDF 可生成 250-380 字符左右的自然 chunk。
+- 英文书籍型 PDF 可生成约 250–380 字符的自然 chunk。
 - 扫描 PDF 开启 OCR 后也能生成带页面位置的 chunk。
 - 跳页时 OCR 与 TTS 都可取消。
 - OCR 关闭时不增加普通 PDF 的启动成本。

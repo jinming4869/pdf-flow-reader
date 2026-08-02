@@ -1,12 +1,12 @@
-# 夜晚的书斋 v4.0「希声」TTS 模型配置决策草案
+# 夜晚的书斋 v4.0「希声」TTS 模型路线历史草案
 
-> 状态说明（2026-07-25）：模型 PoC 已暂停。本文只保留候选路线历史，不代表 MeloTTS 或 Kokoro 已被选为 v4 正式默认模型。内部逻辑达到 `GOAL.md` 完成线后再重新评估。
+> **历史状态：已失效。** 本文记录 2026-07-24 的候选路线，当时尚未完成多语言模型 PoC。v4.0.0 最终采用英文 Kokoro q8 与中日文 Kokoro v1.0 int8、自包含 CJK worker，并默认离线运行；MeloTTS、OpenAI fallback 和首次下载模型均未成为正式方案。当前事实以根目录 [`README.md`](../README.md)、[`CHANGELOG.md`](../CHANGELOG.md)、[`DECISIONS.md`](../DECISIONS.md) 及 [`v4-hisheng/tts-multilingual-v10-integration/`](./v4-hisheng/tts-multilingual-v10-integration/) 为准。
 
 更新时间：2026-07-24
 
-## 结论
+## 当时的候选结论（已失效）
 
-v4.0 MVP 推荐采用：
+2026-07-24 草案曾建议：
 
 ```text
 默认本地：MeloTTS
@@ -21,9 +21,11 @@ v4.0 MVP 推荐采用：
 3. **MiniMax 暂列第二个 API Provider**：中文与多语言质量很值得接，但为了 v4.0 不走散，先不放进第一批开发目标。
 4. **GPT-SoVITS / IndexTTS2 不作为默认内置**：它们更强也更重，适合做“外部本地服务 Provider”，供高级用户自行部署后接入。
 
-一句话：
+草案当时概括为：
 
-> v4.0 先用 MeloTTS 守住“本地希声”的气质，用 OpenAI 守住“在线高质量”的选择权，不在第一版把复杂 TTS 生态全部塞进产品。
+> 用 MeloTTS 作为本地候选，用 OpenAI 作为在线候选，暂不扩大 Provider 范围。
+
+该概括未进入 v4.0.0 正式方案。
 
 ## 为什么不是直接 GPT-SoVITS / IndexTTS2
 
@@ -128,50 +130,30 @@ audio/wav 或 audio/pcm
 
 该 Provider 不进入 v4.0 默认 UI，只留开发者配置或实验入口。
 
-## 基于 Goertz《Social Science Concepts》PDF 的快速测试观察
+## 英文书籍型 PDF 的快速测试观察
 
-测试页：Chapter One, Introduction, PDF 页 16-20。
+### 观察一：英文社科书稿需要克制的朗读策略
 
-### 观察一：这是典型英文社科书，适合 OpenAI 和 MeloTTS-English
-
-文本主体为英文长段落，偶有引文、脚注、页眉、书名斜体、破折号和括号。对 TTS 的要求主要是：
+文本主体通常是英文长段落，并混有引文、脚注、页眉、斜体、破折号和括号。对 TTS 的要求主要是：
 
 - 英文学术句子清晰。
-- 引文不要过度戏剧化。
-- 括号与页码不要读得太烦。
+- 引文不过度戏剧化。
+- 括号与页码不过度打扰。
 - 跳过页眉页脚和脚注。
 
 ### 观察二：TTS 前的文本清洗比模型选择更关键
 
-直接从 PDF 提取会出现：
+直接从 PDF 提取可能出现排版时间戳、重复页眉、跨行断词、连字、单词粘连和异常空格。如果不清洗，任何 TTS 模型都会读出奇怪内容，因此必须先建立 `ReadableChunk` 层。
 
-```text
-October 20, 2005 14:31 nec100 Sheet number ...
-CHAPTER ONE / INTRODUCTION running header
-hyphenated line breaks: democ- racy
-ligatures: ﬁ / ﬂ
-spacing artifacts: beganhisSystem, Goertz’ s
-```
+### 观察三：理想 chunk 长度约 250–380 字符
 
-如果不清洗，任何 TTS 模型都会读出奇怪内容。v4.0 必须先做 `ReadableChunk` 层。
-
-### 观察三：理想 chunk 长度约 250-380 字符
-
-清洗后，Goertz 这类书页每页大约可切成 6-8 个短 chunk。适合低声随读，不适合整页朗读。
-
-示例 chunk：
-
-```text
-The contrast between Collier and Bollen on democracy illustrates this law in action. Collier and Mahon provide an insightful analysis of the concept of democracy, but give little guidance on how one might put these ideas into quantitative action.
-```
-
-这个长度适合：
+清洗后，英文书籍型页面可以切成若干完整短段，适合低声随读，不适合整页朗读。这个长度适合：
 
 - MeloTTS 本地短句生成。
 - OpenAI API streaming。
 - 跳页后快速取消。
 
-## v4.0 实施优先级
+## 草案实施优先级（未采用）
 
 ### P0：文本结构层
 
@@ -187,7 +169,7 @@ The contrast between Collier and Bollen on democracy illustrates this law in act
 
 理由：没有这层，TTS 模型再好也会读垃圾文本。
 
-### P1：MeloTTS 本地 Provider
+### P1（历史）：MeloTTS 本地 Provider
 
 目标：中文、英文、日文短 chunk 本地生成。
 
@@ -218,9 +200,9 @@ The contrast between Collier and Bollen on democracy illustrates this law in act
 - 能发 chunk，收 wav/pcm。
 - 能取消或丢弃过期返回。
 
-## 当前决策
+## 当时的草案结论（已失效）
 
-v4.0 第一版不再继续扩大模型选择范围。推荐锁定：
+这份草案曾建议停止扩大模型范围，并锁定：
 
 ```text
 LocalMeloProvider + OpenAITtsProvider + CustomLocalHttpProvider

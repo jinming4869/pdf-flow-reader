@@ -1,21 +1,26 @@
 # 项目文档
 
-当前工作从仓库根目录开始：
+公开文档按用途组织：
 
-1. [`GOAL.md`](../GOAL.md)
-2. [`DECISIONS.md`](../DECISIONS.md)
-3. [`PLAN.md`](../PLAN.md)
-4. [`TODO.md`](../TODO.md)
-5. [`CONTEXT.md`](../CONTEXT.md)
-6. [`REVIEW.md`](../REVIEW.md)
+## 使用与发布
 
-v4「希声」的资料关系见 [`v4-hisheng/README.md`](./v4-hisheng/README.md)。
+- [`README.md`](../README.md)：下载、使用、隐私与源码构建
+- [`CHANGELOG.md`](../CHANGELOG.md)：版本变化
+- [`RELEASE_v3.0.0.md`](./RELEASE_v3.0.0.md)：历史版本说明
+- [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)：第三方许可
 
-其余文档按性质使用：
+## 当前设计
 
-- `RELEASE_v3.0.0.md` 是公开版本说明。
-- `TTS_PROVIDER.md` 是 v3 时期的未来接口草案。
-- 带 `ENGINEERING_LOG` 或 `IMPLEMENTATION` 的文件记录已经发生的施工事实。
-- 带 `RESEARCH` 的文件提供外部证据，不自动成为产品决定。
+- [`GOAL.md`](../GOAL.md)：项目目标与范围
+- [`CONTEXT.md`](../CONTEXT.md)：当前公开架构概览
+- [`DECISIONS.md`](../DECISIONS.md)：稳定设计决策
+- [`PLAN.md`](../PLAN.md)：公开路线图
+- [`REVIEW.md`](../REVIEW.md)：公开验证摘要
 
-历史文档不应覆盖根目录已经锁定的新决定。个人 PDF、模型缓存、生成音频和发布包不进入仓库。
+## v4「希声」资料
+
+[`v4-hisheng/README.md`](./v4-hisheng/README.md) 汇总 v4 的产品设计、实现说明、模型实验与发布记录。
+
+带有 PRD、IMPLEMENTATION 或 ENGINEERING_LOG 的文档是公开设计历史，用于解释方案演进，不承担当前任务管理。若历史资料与当前实现冲突，以代码、根目录 README 和 CHANGELOG 为准。
+
+个人 PDF、设备信息、内部工作区状态、模型缓存、生成音频和安装包不作为项目文档提交。

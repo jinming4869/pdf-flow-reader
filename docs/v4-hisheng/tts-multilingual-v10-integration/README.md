@@ -1,33 +1,30 @@
-# 中日文 TTS v1.0 正式接线
+# 中日文 TTS v1.0 集成摘要
 
-本目录是这轮应用接线的可审阅工作面。技术依据见 `PLAN.md`、`DECISIONS.md`，完成证据见 `REVIEW.md`。
+本目录记录中文、日文离线朗读接入应用的架构、资源边界与验证依据。
 
-## 本地开发资源
+## 架构
 
-正式代码自动按以下顺序发现资源：
+- 英文保留 `kokoro-js` 本地 worker。
+- 中文与日文共用 Kokoro v1.0 int8 模型和独立 CJK worker。
+- Node 路由器按文字脚本与语言提示分发请求。
+- 中英、日英混排分别合成后拼接为 PCM16 WAV。
+- 活动请求取消时终止旧 worker，后续请求按需重建。
 
-1. `PDF_FLOW_TTS_PYTHON`、`PDF_FLOW_TTS_MODELS_DIR`、`PDF_FLOW_TTS_WORKER` 环境变量；
-2. 安装包预留的 `resources/tts-multilingual/`；
-3. 开发工程的 `experiments/tts-multilingual-poc/.venv` 与 `models/`。
+## 资源发现
 
-当前开发机走第 3 条。虚拟环境由 PoC 的 `uv.lock` 固定，模型目录只需保留这两个文件：
+正式应用只从显式环境变量、安装包资源目录或开发资源目录读取模型。模型、虚拟环境、字典缓存和生成音频不进入 Git。
 
-- `kokoro-v1.0.int8.onnx`
-- `voices-v1.0.bin`
-
-下载地址、字节数和 SHA-256 见 [`MODEL_ASSETS.md`](../../../experiments/tts-multilingual-poc/MODEL_ASSETS.md)。模型、虚拟环境、日文字典和生成音频均不进入 Git。
+模型地址、字节数和 SHA-256 见 [`MODEL_ASSETS.md`](../../../experiments/tts-multilingual-poc/MODEL_ASSETS.md)。正式发布包的运行时组成见项目根目录 [`THIRD_PARTY_NOTICES.md`](../../../THIRD_PARTY_NOTICES.md)。
 
 ## 验证
 
-```bash
-npm test
-cd experiments/tts-multilingual-poc && .venv/bin/python -m pytest -q
-cd ../.. && experiments/tts-multilingual-poc/.venv/bin/python -m pytest -q tests/tts_multilingual_worker_test.py
-npm run test:tts-multilingual:smoke
-```
+集成测试覆盖：
 
-最后一条命令会真实启动应用 HTTP 服务，验证中文四档连续速度、中英混排、日文路由、活动推理硬取消与 worker 重建，并把可试听 WAV 写入 `output/speech/integration-v10/`。
+- 中文、日文与英文路由
+- 连续速度
+- 混排文本
+- 实际 voice、model、dtype 与 sample rate 元数据
+- HTTP 取消、worker 终止和重建
+- 本地模型缺失时的明确错误
 
-## 发布边界
-
-本阶段没有把开发机 `.venv` 伪装成可发布 runtime。发布前仍需完成跨平台 Python/runtime 组装、日文字典随包、模型分发和 GPL/eSpeak 合规决策；未完成这些工作前，现有 Release 不应宣称已内置这条中日文链。
+当前发布状态与测试数量以 [`CHANGELOG.md`](../../../CHANGELOG.md) 和 GitHub Actions 为准。

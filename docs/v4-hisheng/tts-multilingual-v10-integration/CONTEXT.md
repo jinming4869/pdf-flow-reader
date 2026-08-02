@@ -1,8 +1,21 @@
-# 上下文
+# 集成背景
 
-- PoC 已在提交 `af1864b` 验证：中日文离线合成、持久 worker、硬取消、进程重建与 Unicode 路径规避均可行。
-- 用户于 2026-07-31 选择中文 v1.0，默认音色 `zf_xiaobei`。
-- 当前正式应用把中文/日文错误映射到英文 `af_heart`，所以“支持中英日”的界面元数据与真实能力不一致。
-- 当前英文 `tts-runtime-client.mjs` 已有串行队列、背压、超时、崩溃恢复和 `SIGKILL` 硬取消，必须保留。
-- 本地可复用资源位于 `experiments/tts-multilingual-poc/.venv` 与 `experiments/tts-multilingual-poc/models`，均被 Git 忽略。
-- 工程路径含中文；eSpeak 数据必须通过 ASCII 临时软链接路径加载。
+早期英文运行时能够稳定朗读拉丁文本，但中文和日文会经过不合适的英语音素化路径。多语言 PoC 证明，中日文可以使用 Kokoro v1.0 int8、Misaki 与 pyopenjtalk 在本机完成实时以下合成。
+
+## 保留能力
+
+- 英文 worker 的队列、背压、超时与崩溃恢复
+- HTTP 请求取消向子进程传播
+- 阅读策略与音频层已有的播放锁和 generation 隔离
+
+## 新增能力
+
+- 中文默认音色 `zf_xiaobei`
+- 日文默认音色 `jf_alpha`
+- 中文、日文共享模型资源
+- 文字脚本与显式语言提示共同路由
+- 中英、日英混排分段和 PCM 拼接
+
+## 路径兼容
+
+部分底层语音依赖在非 ASCII 路径中可能错误引用构建机数据路径。开发 PoC 使用由父进程管理的临时 ASCII shadow path 规避，并确保取消或退出后清理临时目录。正式 v4 CJK runtime 已移除 eSpeak 相关依赖。

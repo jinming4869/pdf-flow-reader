@@ -1,6 +1,8 @@
-# TTS Provider interface draft
+# TTS Provider interface draft (v3 historical document)
 
-This document reserves the architecture for a future v4.0 TTS feature. v3.0 does not implement speech synthesis, does not call any API, and does not send document text anywhere.
+> **Historical status:** This document records the provider interface proposed during v3.0, before speech synthesis was implemented. v4.0.0 now ships local Kokoro runtimes for English, Chinese, and Japanese. Current behavior is documented in the root `README.md`, `CHANGELOG.md`, and `docs/v4-hisheng/`; the future-tense and v3 boundaries below are retained only as design history.
+
+During v3.0, the application did not implement speech synthesis, call a TTS API, or send document text anywhere.
 
 ## Goal
 

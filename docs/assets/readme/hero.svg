@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="620" viewBox="0 0 1400 620" role="img" aria-labelledby="title desc">
+  <title id="title">夜晚的书斋</title>
+  <desc id="desc">一页纸在夜色中缓缓流动，旁边写着让 PDF 阅读和轻吻纸质书一样好玩。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101a2e"/>
+      <stop offset="0.54" stop-color="#1f3043"/>
+      <stop offset="1" stop-color="#36584b"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#fffdf5"/>
+      <stop offset="1" stop-color="#e9e1cf"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#dfc68d" stop-opacity=".34"/>
+      <stop offset="1" stop-color="#8bb3a0" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="180%">
+      <feDropShadow dx="0" dy="22" stdDeviation="24" flood-color="#071018" flood-opacity=".48"/>
+    </filter>
+    <filter id="soft"><feGaussianBlur stdDeviation="32"/></filter>
+  </defs>
+  <rect width="1400" height="620" rx="34" fill="url(#bg)"/>
+  <circle cx="1185" cy="120" r="58" fill="#f2dfad" opacity=".88"/>
+  <circle cx="1162" cy="102" r="58" fill="#1b2a3d" opacity=".86"/>
+  <g fill="#f7edd0" opacity=".72">
+    <circle cx="1010" cy="88" r="3"/><circle cx="1080" cy="165" r="2"/><circle cx="1278" cy="208" r="3"/>
+    <circle cx="930" cy="190" r="2"/><circle cx="1322" cy="88" r="2"/><circle cx="870" cy="94" r="2"/>
+  </g>
+  <ellipse cx="1000" cy="510" rx="390" ry="90" fill="url(#glow)" filter="url(#soft)"/>
+  <g transform="translate(770 165) rotate(-3 250 180)" filter="url(#shadow)">
+    <path d="M34 52 Q226 20 265 72 L265 388 Q205 340 34 372 Z" fill="url(#paper)"/>
+    <path d="M496 52 Q304 20 265 72 L265 388 Q325 340 496 372 Z" fill="#f6f1e4"/>
+    <path d="M265 72 L265 388" stroke="#c5b99f" stroke-width="3"/>
+    <g stroke="#75877d" stroke-width="5" stroke-linecap="round" opacity=".62">
+      <path d="M82 116 H216"/><path d="M82 148 H230"/><path d="M82 180 H208"/><path d="M82 226 H222"/><path d="M82 258 H188"/>
+      <path d="M310 116 H446"/><path d="M300 148 H446"/><path d="M318 180 H446"/><path d="M300 226 H430"/><path d="M320 258 H446"/>
+    </g>
+    <path d="M265 388 C244 414 216 424 185 424" fill="none" stroke="#d5c7aa" stroke-width="8" stroke-linecap="round"/>
+    <path d="M265 388 C286 414 314 424 345 424" fill="none" stroke="#d5c7aa" stroke-width="8" stroke-linecap="round"/>
+  </g>
+  <g transform="translate(92 104)">
+    <g transform="translate(0 0)">
+      <circle cx="29" cy="29" r="29" fill="#88a994"/>
+      <path d="M29 14 V40 M20 31 L29 40 L38 31" fill="none" stroke="#fffdf5" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <text x="0" y="128" fill="#fffdf5" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="68" font-weight="700" letter-spacing="4">夜晚的书斋</text>
+    <text x="2" y="186" fill="#c9d9d0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="24" letter-spacing="3">PDF FLOW READER</text>
+    <text x="0" y="278" fill="#f6edda" font-family="PingFang SC, Noto Serif CJK SC, Songti SC, serif" font-size="31">让 PDF 阅读和轻吻纸质书一样好玩</text>
+    <text x="0" y="328" fill="#b8c9c0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="20">本地 · 离线 · 有阅读节奏感</text>
+    <g transform="translate(0 382)">
+      <rect width="154" height="46" rx="23" fill="#eff4ed" opacity=".96"/>
+      <text x="77" y="30" text-anchor="middle" fill="#29463b" font-family="PingFang SC, sans-serif" font-size="17" font-weight="650">macOS ARM64</text>
+      <rect x="170" width="138" height="46" rx="23" fill="#eff4ed" opacity=".96"/>
+      <text x="239" y="30" text-anchor="middle" fill="#29463b" font-family="PingFang SC, sans-serif" font-size="17" font-weight="650">Windows x64</text>
+      <rect x="324" width="112" height="46" rx="23" fill="#88a994"/>
+      <text x="380" y="30" text-anchor="middle" fill="#fffdf5" font-family="PingFang SC, sans-serif" font-size="17" font-weight="650">v4.0.0</text>
+    </g>
+  </g>
+  <path d="M0 548 C210 510 350 588 560 546 S900 502 1110 550 S1310 586 1400 556 V620 H0 Z" fill="#0b1422" opacity=".38"/>
+</svg>

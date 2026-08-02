@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="790" viewBox="0 0 1400 790" role="img" aria-labelledby="title desc">
+  <title id="title">六档阅读节奏</title>
+  <desc id="desc">从雪国朦胧到万物繁盛，六个速度档位对应六种视觉氛围与朗读方式。</desc>
+  <defs>
+    <filter id="s" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#263129" flood-opacity=".13"/></filter>
+  </defs>
+  <rect width="1400" height="790" rx="30" fill="#f4f1e9"/>
+  <text x="70" y="78" fill="#26342d" font-family="PingFang SC, Noto Serif CJK SC, serif" font-size="38" font-weight="700">一条滑杆，六种阅读天气</text>
+  <text x="70" y="116" fill="#6b756f" font-family="PingFang SC, sans-serif" font-size="19">速度改变的不只有 px/s，也改变纸页的颜色、声音出现的距离，以及你与句子的关系。</text>
+
+  <g transform="translate(70 155)" filter="url(#s)">
+    <rect width="400" height="255" rx="24" fill="#d7d2cd"/>
+    <circle cx="332" cy="56" r="4" fill="#fff"/><circle cx="290" cy="86" r="3" fill="#fff"/><circle cx="360" cy="110" r="3" fill="#fff"/>
+    <path d="M220 190 L276 128 L320 168 L360 108 L400 176" fill="none" stroke="#666365" stroke-width="5" opacity=".55"/>
+    <text x="28" y="50" fill="#4c4b4d" font-family="PingFang SC, serif" font-size="28" font-weight="700">雪国朦胧</text>
+    <text x="28" y="83" fill="#646165" font-family="PingFang SC, sans-serif" font-size="16">4–8 px/s</text>
+    <text x="28" y="142" fill="#343334" font-family="PingFang SC, sans-serif" font-size="19">舒适随读</text>
+    <text x="28" y="174" fill="#5f5d60" font-family="PingFang SC, sans-serif" font-size="16">预备后续片段，需要时先准备下一页文字</text>
+  </g>
+
+  <g transform="translate(500 155)" filter="url(#s)">
+    <rect width="400" height="255" rx="24" fill="#a3b5c5"/>
+    <path d="M220 214 C270 160 326 132 400 84" fill="none" stroke="#1b2a5e" stroke-width="6" opacity=".48"/>
+    <path d="M250 60 H315 V126 H250 Z M334 36 H384 V86 H334 Z" fill="none" stroke="#e8eef4" stroke-width="4" opacity=".7"/>
+    <text x="28" y="50" fill="#172654" font-family="PingFang SC, serif" font-size="28" font-weight="700">美学散步</text>
+    <text x="28" y="83" fill="#233766" font-family="PingFang SC, sans-serif" font-size="16">9–14 px/s</text>
+    <text x="28" y="142" fill="#14234f" font-family="PingFang SC, sans-serif" font-size="19">1.5–2.5× 跟随纸页</text>
+    <text x="28" y="174" fill="#263b69" font-family="PingFang SC, sans-serif" font-size="16">省略脚注与岔路，来不及便安静略过</text>
+  </g>
+
+  <g transform="translate(930 155)" filter="url(#s)">
+    <rect width="400" height="255" rx="24" fill="#e9aa72"/>
+    <circle cx="332" cy="62" r="46" fill="#f7d273" opacity=".8"/>
+    <path d="M238 188 H390" stroke="#9f5037" stroke-width="5" opacity=".55"/><circle cx="292" cy="188" r="8" fill="#8c442f"/>
+    <text x="28" y="50" fill="#743723" font-family="PingFang SC, serif" font-size="28" font-weight="700">长日留痕</text>
+    <text x="28" y="83" fill="#82442d" font-family="PingFang SC, sans-serif" font-size="16">15–21 px/s</text>
+    <text x="28" y="142" fill="#703824" font-family="PingFang SC, sans-serif" font-size="19">阅读线下的一句话</text>
+    <text x="28" y="174" fill="#7b452f" font-family="PingFang SC, sans-serif" font-size="16">按 R 或乐符，读一次，然后归于安静</text>
+  </g>
+
+  <g transform="translate(70 445)" filter="url(#s)">
+    <rect width="400" height="255" rx="24" fill="#dedddd"/>
+    <path d="M205 192 C260 126 302 224 350 152 S418 92 430 118" fill="none" stroke="#536b79" stroke-width="7" opacity=".54"/>
+    <path d="M215 218 C278 178 334 242 400 196" fill="none" stroke="#8ea0aa" stroke-width="3"/>
+    <text x="28" y="50" fill="#394d59" font-family="PingFang SC, serif" font-size="28" font-weight="700">流觞曲水</text>
+    <text x="28" y="83" fill="#506571" font-family="PingFang SC, sans-serif" font-size="16">22–31 px/s</text>
+    <text x="28" y="142" fill="#344954" font-family="PingFang SC, sans-serif" font-size="19">段首句接力</text>
+    <text x="28" y="174" fill="#5c6e77" font-family="PingFang SC, sans-serif" font-size="16">越过一个自然段，下一段的开头泛起声音</text>
+  </g>
+
+  <g transform="translate(500 445)" filter="url(#s)">
+    <rect width="400" height="255" rx="24" fill="#e7e6e7"/>
+    <path d="M210 200 L390 84 M245 222 L420 112" stroke="#c7636a" stroke-width="8" opacity=".55"/>
+    <circle cx="350" cy="70" r="30" fill="#acd0d8" opacity=".65"/>
+    <text x="28" y="50" fill="#94464f" font-family="PingFang SC, serif" font-size="28" font-weight="700">强风吹拂</text>
+    <text x="28" y="83" fill="#a14f57" font-family="PingFang SC, sans-serif" font-size="16">32–44 px/s</text>
+    <text x="28" y="142" fill="#833c45" font-family="PingFang SC, sans-serif" font-size="19">点哪里，读哪里</text>
+    <text x="28" y="174" fill="#9c5960" font-family="PingFang SC, sans-serif" font-size="16">页面保持高速，声音只响应一次点击</text>
+  </g>
+
+  <g transform="translate(930 445)" filter="url(#s)">
+    <rect width="400" height="255" rx="24" fill="#171717"/>
+    <path d="M195 176 C260 95 318 224 392 132" fill="none" stroke="#a6a6a2" stroke-width="13" opacity=".55"/>
+    <path d="M220 220 C290 168 350 246 420 186" fill="none" stroke="#586675" stroke-width="6" opacity=".8"/>
+    <text x="28" y="50" fill="#f2ede2" font-family="PingFang SC, serif" font-size="28" font-weight="700">万物繁盛</text>
+    <text x="28" y="83" fill="#bbb7ae" font-family="PingFang SC, sans-serif" font-size="16">45–64 px/s</text>
+    <text x="28" y="142" fill="#f2ede2" font-family="PingFang SC, sans-serif" font-size="19">高速点句</text>
+    <text x="28" y="174" fill="#bcb8af" font-family="PingFang SC, sans-serif" font-size="16">快到极处，决定权重新交回指尖</text>
+  </g>
+</svg>

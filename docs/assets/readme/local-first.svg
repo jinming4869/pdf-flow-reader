@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="460" viewBox="0 0 1400 460" role="img" aria-labelledby="title desc">
+  <title id="title">本地处理链路</title>
+  <desc id="desc">PDF 从原生文字或本地 OCR 进入可读文本，再由本地 Kokoro 模型生成声音，整个过程留在电脑里。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#eef1eb"/><stop offset="1" stop-color="#e4ebe6"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#30443a" flood-opacity=".12"/></filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#6b8276"/></marker>
+  </defs>
+  <rect width="1400" height="460" rx="30" fill="url(#bg)"/>
+  <text x="70" y="70" fill="#26382f" font-family="PingFang SC, Noto Serif CJK SC, serif" font-size="36" font-weight="700">一份 PDF，从打开到发声，都留在这台电脑里</text>
+  <text x="70" y="108" fill="#68776f" font-family="PingFang SC, sans-serif" font-size="18">正式桌面版携带 OCR、中文、英文和日文模型；PDF 与朗读文字不需要交给云端。</text>
+
+  <g transform="translate(70 165)" font-family="PingFang SC, Noto Sans CJK SC, sans-serif">
+    <g filter="url(#shadow)">
+      <rect width="200" height="170" rx="22" fill="#fffdf7"/>
+      <path d="M64 36 H136 L158 58 V128 H64 Z" fill="#f3eee2" stroke="#6e8177" stroke-width="3"/>
+      <path d="M136 36 V60 H158" fill="none" stroke="#6e8177" stroke-width="3"/>
+      <text x="100" y="154" text-anchor="middle" fill="#32463c" font-size="19" font-weight="700">本地 PDF</text>
+    </g>
+    <path d="M215 85 H284" stroke="#6b8276" stroke-width="4" marker-end="url(#arrow)"/>
+
+    <g transform="translate(300)" filter="url(#shadow)">
+      <rect width="230" height="170" rx="22" fill="#f9fbf7"/>
+      <text x="115" y="42" text-anchor="middle" fill="#32463c" font-size="20" font-weight="700">文字来源判断</text>
+      <rect x="24" y="66" width="82" height="48" rx="14" fill="#d7e5dc"/>
+      <text x="65" y="96" text-anchor="middle" fill="#345145" font-size="16">原生文字</text>
+      <rect x="124" y="66" width="82" height="48" rx="14" fill="#eadfc7"/>
+      <text x="165" y="96" text-anchor="middle" fill="#695839" font-size="16">本地 OCR</text>
+      <text x="115" y="142" text-anchor="middle" fill="#6c7871" font-size="14">缺字时才扫描附近页</text>
+    </g>
+    <path d="M545 85 H614" stroke="#6b8276" stroke-width="4" marker-end="url(#arrow)"/>
+
+    <g transform="translate(630)" filter="url(#shadow)">
+      <rect width="220" height="170" rx="22" fill="#f9fbf7"/>
+      <text x="110" y="44" text-anchor="middle" fill="#32463c" font-size="20" font-weight="700">可读文本</text>
+      <path d="M44 72 H176 M44 96 H160 M44 120 H182" stroke="#6c8578" stroke-width="5" stroke-linecap="round" opacity=".7"/>
+      <text x="110" y="150" text-anchor="middle" fill="#6c7871" font-size="14">正文、句子与段落结构</text>
+    </g>
+    <path d="M865 85 H934" stroke="#6b8276" stroke-width="4" marker-end="url(#arrow)"/>
+
+    <g transform="translate(950)" filter="url(#shadow)">
+      <rect width="220" height="170" rx="22" fill="#263b32"/>
+      <circle cx="110" cy="84" r="38" fill="#89aa96"/>
+      <path d="M88 84 C96 72 102 72 110 84 S124 96 132 84" fill="none" stroke="#fffdf5" stroke-width="4" stroke-linecap="round"/>
+      <text x="110" y="42" text-anchor="middle" fill="#f7f2e8" font-size="20" font-weight="700">本地 Kokoro</text>
+      <text x="110" y="150" text-anchor="middle" fill="#c8d8cf" font-size="14">中 · 英 · 日独立路由</text>
+    </g>
+    <path d="M1185 85 H1204" stroke="#6b8276" stroke-width="4" marker-end="url(#arrow)"/>
+
+    <g transform="translate(1210 22)">
+      <circle cx="52" cy="63" r="52" fill="#fffdf7" filter="url(#shadow)"/>
+      <path d="M26 64 H40 L56 48 V82 L40 68 H26 Z" fill="#517360"/>
+      <path d="M66 54 C76 62 76 70 66 78 M76 45 C92 58 92 74 76 87" fill="none" stroke="#517360" stroke-width="4" stroke-linecap="round"/>
+      <text x="52" y="140" text-anchor="middle" fill="#32463c" font-size="17" font-weight="700">声音</text>
+    </g>
+  </g>
+
+  <g transform="translate(70 385)" font-family="PingFang SC, sans-serif">
+    <rect width="242" height="42" rx="21" fill="#d4e2d8"/>
+    <text x="121" y="27" text-anchor="middle" fill="#365346" font-size="15" font-weight="650">127.0.0.1 本地服务</text>
+    <rect x="258" width="230" height="42" rx="21" fill="#d4e2d8"/>
+    <text x="373" y="27" text-anchor="middle" fill="#365346" font-size="15" font-weight="650">模型随桌面包提供</text>
+    <rect x="504" width="250" height="42" rx="21" fill="#d4e2d8"/>
+    <text x="629" y="27" text-anchor="middle" fill="#365346" font-size="15" font-weight="650">跳页时取消旧任务</text>
+    <rect x="770" width="242" height="42" rx="21" fill="#d4e2d8"/>
+    <text x="891" y="27" text-anchor="middle" fill="#365346" font-size="15" font-weight="650">大文件按区间读取</text>
+  </g>
+</svg>

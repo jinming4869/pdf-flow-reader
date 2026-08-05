@@ -1,4 +1,10 @@
 import * as pdfjsLib from "./vendor/pdf.mjs";
+import {
+  bookSequenceLabel,
+  carouselOffset,
+  moveCarouselIndex,
+  paletteForBook,
+} from "./book-carousel.mjs";
 import { createLocalOcrProvider } from "./ocr-provider.mjs";
 import {
   continuousOcrAheadPage,
@@ -103,6 +109,12 @@ const elements = {
   emptyState: document.querySelector("#emptyState"),
   homeEcho: document.querySelector("#homeEcho"),
   recentBooks: document.querySelector("#recentBooks"),
+  bookPrev: document.querySelector("#bookPrev"),
+  bookNext: document.querySelector("#bookNext"),
+  bookSelectionTitle: document.querySelector("#bookSelectionTitle"),
+  bookSelectionMeta: document.querySelector("#bookSelectionMeta"),
+  takeBook: document.querySelector("#takeBook"),
+  openNewBook: document.querySelector("#openNewBook"),
   resumeHint: document.querySelector("#resumeHint"),
   rhythmEcho: document.querySelector("#rhythmEcho"),
   clearRecords: document.querySelector("#clearRecords"),
@@ -224,6 +236,11 @@ let diagnosticsSession = {
 let activeDocumentRecord = null;
 let activeFileMeta = null;
 let pendingResumeRecord = null;
+let homeBookItems = [];
+let homeBookIndex = 0;
+let homeBookSelectedId = null;
+let homeBookTakeTimer = 0;
+let homeBookWheelLocked = false;
 let persistTimer = 0;
 let restoreMessageTimer = 0;
 const ttsProvider = pickTtsProvider(ttsProviderConfigFromPreferences(localState.preferences));
@@ -553,44 +570,163 @@ function formatEstimateRange(min, max, unit) {
   return `约 ${numberFormat.format(low)}–${numberFormat.format(high)} ${unit}`;
 }
 
-function renderHomeEcho() {
-  const recent = recentDocumentRecords(localState);
-  elements.homeEcho.hidden = false;
-  elements.clearRecords.hidden = recent.length === 0;
-  elements.recentBooks.replaceChildren();
+function createHomeBookButton(item, index, length) {
+  const button = document.createElement("button");
+  const isNewBook = item.type === "new";
+  const record = item.record ?? null;
+  const title = isNewBook ? "打开一本新书" : displayTitle(record.fileName);
+  const palette = paletteForBook(item.id);
 
-  if (!recent.length) {
-    const emptyCard = document.createElement("div");
-    emptyCard.className = "recent-book-card is-empty";
-    emptyCard.innerHTML = `
-      <span class="recent-book-title">读过的书，会在这里留下回声。</span>
-      <span class="recent-book-progress">上次停下的位置、节奏和速度会只保存在本机。</span>
-      <span class="recent-book-rhythm">选择一份 PDF 开始。</span>
-    `;
-    elements.recentBooks.append(emptyCard);
-  }
-
-  for (const record of recent) {
-    const button = document.createElement("button");
-    button.className = "recent-book-card";
-    button.type = "button";
-    button.dataset.documentId = record.id;
-    button.innerHTML = `
+  button.className = `recent-book-card${isNewBook ? " is-new-book" : ""}`;
+  button.type = "button";
+  button.dataset.bookIndex = String(index);
+  if (record?.id) button.dataset.documentId = record.id;
+  button.setAttribute("role", "option");
+  button.setAttribute("aria-label", isNewBook
+    ? "打开一本新的 PDF"
+    : `继续阅读《${title}》，${formatProgress(record)}`);
+  button.style.setProperty("--book-base", palette.base);
+  button.style.setProperty("--book-deep", palette.deep);
+  button.style.setProperty("--book-ink", palette.ink);
+  button.style.setProperty("--book-glow", palette.glow);
+  button.style.setProperty("--book-delay", `${Math.min(index, 6) * 55}ms`);
+  button.innerHTML = `
+    <span class="book-spine" aria-hidden="true">
+      <span>${isNewBook ? "NEW BOOK" : "READING ECHO"}</span>
+    </span>
+    <span class="book-cover">
+      <span class="book-cover-kicker">${isNewBook ? "A BLANK PAGE AWAITS" : "THE NIGHT SHELF"}</span>
+      <span class="book-cover-ornament" aria-hidden="true"><i></i><i></i><i></i></span>
       <span class="recent-book-title"></span>
+      <span class="book-cover-rule" aria-hidden="true"></span>
       <span class="recent-book-progress"></span>
       <span class="recent-book-rhythm"></span>
-      <span class="recent-book-action">从这里继续</span>
-    `;
-    button.querySelector(".recent-book-title").textContent = displayTitle(record.fileName);
-    button.querySelector(".recent-book-progress").textContent = formatProgress(record);
-    button.querySelector(".recent-book-rhythm").textContent = `${speedTier(record.lastSpeedPxPerSecond).name} · ${record.lastSpeedPxPerSecond} px/s`;
-    elements.recentBooks.append(button);
+      <span class="book-cover-sequence"></span>
+    </span>
+    <span class="book-page-edge" aria-hidden="true"></span>
+  `;
+  button.querySelector(".recent-book-title").textContent = title;
+  button.querySelector(".recent-book-progress").textContent = isNewBook
+    ? "选择或拖入 PDF"
+    : formatProgress(record);
+  button.querySelector(".recent-book-rhythm").textContent = isNewBook
+    ? "从一页留白开始"
+    : `${speedTier(record.lastSpeedPxPerSecond).name} · ${record.lastSpeedPxPerSecond} px/s`;
+  button.querySelector(".book-cover-sequence").textContent = isNewBook
+    ? "OPEN / LOCAL"
+    : bookSequenceLabel(index, length);
+  return button;
+}
+
+function selectedHomeBook() {
+  return homeBookItems[homeBookIndex] ?? homeBookItems[0] ?? null;
+}
+
+function updateHomeBookCarousel({ focus = false } = {}) {
+  const length = homeBookItems.length;
+  if (!length) return;
+  homeBookIndex = moveCarouselIndex(homeBookIndex, length, 0);
+  const selected = selectedHomeBook();
+  homeBookSelectedId = selected?.id ?? null;
+
+  let selectedCard = null;
+  for (const card of elements.recentBooks.querySelectorAll(".recent-book-card")) {
+    const index = Number(card.dataset.bookIndex);
+    const placement = carouselOffset(index, homeBookIndex, length);
+    const isSelected = index === homeBookIndex;
+    card.dataset.offset = String(placement.offset);
+    card.classList.toggle("is-selected", isSelected);
+    card.classList.toggle("is-outside", placement.hidden);
+    card.setAttribute("aria-selected", String(isSelected));
+    card.setAttribute("aria-hidden", String(placement.hidden));
+    card.tabIndex = isSelected ? 0 : -1;
+    if (isSelected) selectedCard = card;
   }
 
-  elements.resumeHint.hidden = !pendingResumeRecord;
-  if (pendingResumeRecord) {
-    elements.resumeHint.textContent = `请选择《${displayTitle(pendingResumeRecord.fileName)}》原文件，书斋会回到上次停下的位置。`;
-  }
+  const isNewBook = selected?.type === "new";
+  const record = selected?.record ?? null;
+  elements.bookSelectionTitle.textContent = isNewBook
+    ? "打开一本新书"
+    : displayTitle(record.fileName);
+  elements.bookSelectionMeta.textContent = isNewBook
+    ? "选择或拖入 PDF，书页只在本机打开。"
+    : `${formatProgress(record)} · ${speedTier(record.lastSpeedPxPerSecond).name} · 确认后请选择原 PDF`;
+  elements.takeBook.textContent = isNewBook ? "打开新书" : "取下这本书";
+  elements.openNewBook.hidden = isNewBook;
+  elements.resumeHint.hidden = true;
+  elements.bookPrev.disabled = length <= 1;
+  elements.bookNext.disabled = length <= 1;
+  if (focus) selectedCard?.focus({ preventScroll: true });
+}
+
+function selectHomeBook(index, options = {}) {
+  if (!homeBookItems.length) return;
+  homeBookIndex = moveCarouselIndex(index, homeBookItems.length, 0);
+  updateHomeBookCarousel(options);
+}
+
+function moveHomeBook(delta, options = {}) {
+  if (homeBookItems.length <= 1) return;
+  homeBookIndex = moveCarouselIndex(homeBookIndex, homeBookItems.length, delta);
+  updateHomeBookCarousel(options);
+}
+
+function clearHomeBookTakingState() {
+  globalThis.clearTimeout(homeBookTakeTimer);
+  homeBookTakeTimer = 0;
+  elements.homeEcho.classList.remove("is-taking");
+  elements.recentBooks.querySelector(".recent-book-card.is-taking")?.classList.remove("is-taking");
+  updateHomeBookCarousel();
+}
+
+function takeSelectedHomeBook() {
+  const selected = selectedHomeBook();
+  if (!selected || elements.homeEcho.classList.contains("is-taking")) return;
+  pendingResumeRecord = selected.type === "recent" ? selected.record : null;
+  elements.homeEcho.classList.add("is-taking");
+  elements.recentBooks.querySelector(".recent-book-card.is-selected")?.classList.add("is-taking");
+  elements.bookSelectionTitle.textContent = selected.type === "recent"
+    ? `正在取下《${displayTitle(selected.record.fileName)}》`
+    : "正在翻开一页留白";
+  elements.bookSelectionMeta.textContent = selected.type === "recent"
+    ? "稍后请选择同一份原 PDF，书签会回到上次停下的位置。"
+    : "选择一份 PDF，开始新的阅读。";
+
+  const launchDelay = reducedMotion.matches ? 0 : 520;
+  homeBookTakeTimer = globalThis.setTimeout(() => {
+    elements.documentName.textContent = selected.type === "recent"
+      ? `请选择《${displayTitle(selected.record.fileName)}》继续阅读`
+      : "选择一份 PDF 放上书架";
+    elements.filePicker.click();
+    homeBookTakeTimer = globalThis.setTimeout(
+      clearHomeBookTakingState,
+      reducedMotion.matches ? 0 : 900,
+    );
+  }, launchDelay);
+}
+
+function renderHomeEcho() {
+  const recent = recentDocumentRecords(localState);
+  const recentItems = recent.map((record) => ({
+    id: record.id,
+    type: "recent",
+    record,
+  }));
+  homeBookItems = [...recentItems, { id: "new-book", type: "new", record: null }];
+  const selectedIndex = homeBookItems.findIndex((item) => item.id === homeBookSelectedId);
+  homeBookIndex = selectedIndex >= 0 ? selectedIndex : 0;
+
+  elements.homeEcho.hidden = false;
+  elements.emptyState.classList.add("has-book-carousel");
+  elements.homeEcho.classList.remove("is-ready", "is-taking");
+  elements.clearRecords.hidden = recent.length === 0;
+  elements.recentBooks.replaceChildren(
+    ...homeBookItems.map((item, index) => createHomeBookButton(item, index, homeBookItems.length)),
+  );
+  updateHomeBookCarousel();
+  globalThis.requestAnimationFrame(() => {
+    globalThis.requestAnimationFrame(() => elements.homeEcho.classList.add("is-ready"));
+  });
 
   const echo = latestRhythmEcho(localState);
   elements.rhythmEcho.hidden = !echo;
@@ -3315,6 +3451,7 @@ async function openLocalFile(file) {
   } finally {
     pendingResumeRecord = null;
     elements.filePicker.value = "";
+    clearHomeBookTakingState();
   }
 }
 
@@ -3322,17 +3459,76 @@ elements.filePicker.addEventListener("change", () => {
   void openLocalFile(elements.filePicker.files?.[0]);
 });
 
+elements.filePicker.addEventListener("cancel", () => {
+  pendingResumeRecord = null;
+  clearHomeBookTakingState();
+});
+
 elements.recentBooks.addEventListener("click", (event) => {
   const card = event.target instanceof Element
     ? event.target.closest(".recent-book-card")
     : null;
   if (!(card instanceof HTMLButtonElement)) return;
-  const record = localState.documents[card.dataset.documentId];
-  if (!record) return;
-  pendingResumeRecord = record;
-  renderHomeEcho();
-  elements.documentName.textContent = `请选择《${displayTitle(record.fileName)}》继续阅读`;
-  elements.filePicker.click();
+  const index = Number(card.dataset.bookIndex);
+  if (!Number.isInteger(index)) return;
+  if (index === homeBookIndex) {
+    takeSelectedHomeBook();
+    return;
+  }
+  selectHomeBook(index, { focus: true });
+});
+
+elements.recentBooks.addEventListener("keydown", (event) => {
+  if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "Enter", "Space"].includes(event.code)) {
+    return;
+  }
+  event.stopPropagation();
+  if (event.code === "ArrowLeft" || event.code === "ArrowUp") {
+    event.preventDefault();
+    moveHomeBook(-1, { focus: true });
+    return;
+  }
+  if (event.code === "ArrowRight" || event.code === "ArrowDown") {
+    event.preventDefault();
+    moveHomeBook(1, { focus: true });
+    return;
+  }
+  if (event.code === "Home") {
+    event.preventDefault();
+    selectHomeBook(0, { focus: true });
+    return;
+  }
+  if (event.code === "End") {
+    event.preventDefault();
+    selectHomeBook(homeBookItems.length - 1, { focus: true });
+    return;
+  }
+  if (event.code === "Enter" || event.code === "Space") {
+    event.preventDefault();
+    takeSelectedHomeBook();
+  }
+});
+
+elements.recentBooks.addEventListener("wheel", (event) => {
+  if (homeBookItems.length <= 1 || homeBookWheelLocked) return;
+  const axis = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+  if (Math.abs(axis) < 8) return;
+  event.preventDefault();
+  homeBookWheelLocked = true;
+  moveHomeBook(axis > 0 ? 1 : -1, { focus: true });
+  globalThis.setTimeout(() => {
+    homeBookWheelLocked = false;
+  }, reducedMotion.matches ? 0 : 180);
+}, { passive: false });
+
+elements.bookPrev.addEventListener("click", () => moveHomeBook(-1, { focus: true }));
+elements.bookNext.addEventListener("click", () => moveHomeBook(1, { focus: true }));
+elements.takeBook.addEventListener("click", takeSelectedHomeBook);
+elements.openNewBook.addEventListener("click", () => {
+  const index = homeBookItems.findIndex((item) => item.type === "new");
+  if (index < 0) return;
+  selectHomeBook(index);
+  globalThis.requestAnimationFrame(takeSelectedHomeBook);
 });
 
 elements.clearRecords.addEventListener("click", () => {
@@ -3341,6 +3537,7 @@ elements.clearRecords.addEventListener("click", () => {
   saveLocalState(clearLocalState());
   activeDocumentRecord = null;
   activeFileMeta = null;
+  homeBookSelectedId = null;
   renderHomeEcho();
 });
 

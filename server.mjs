@@ -16,6 +16,7 @@ function createStaticFiles(appRoot) {
     ["/index.html", [join(appRoot, "index.html"), "text/html; charset=utf-8"]],
     ["/styles.css", [join(appRoot, "styles.css"), "text/css; charset=utf-8"]],
     ["/app.mjs", [join(appRoot, "app.mjs"), "text/javascript; charset=utf-8"]],
+    ["/book-carousel.mjs", [join(appRoot, "book-carousel.mjs"), "text/javascript; charset=utf-8"]],
     ["/chunk-coordinate.mjs", [join(appRoot, "chunk-coordinate.mjs"), "text/javascript; charset=utf-8"]],
     ["/http-range.mjs", [join(appRoot, "http-range.mjs"), "text/javascript; charset=utf-8"]],
     ["/pdf-source.mjs", [join(appRoot, "pdf-source.mjs"), "text/javascript; charset=utf-8"]],

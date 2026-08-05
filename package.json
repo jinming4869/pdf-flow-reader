@@ -33,6 +33,7 @@
       "electron-main.mjs",
       "server.mjs",
       "app.mjs",
+      "book-carousel.mjs",
       "index.html",
       "styles.css",
       "http-range.mjs",

@@ -233,6 +233,7 @@ test("registered static assets use Content-Length and support HEAD", async (t) =
   assert.ok(Number(textSourceState.headers.get("content-length")) > 1000);
 
   for (const moduleName of [
+    "book-carousel.mjs",
     "tts-audio-player.mjs",
     "tts-aesthetic-walk.mjs",
     "tts-controller.mjs",

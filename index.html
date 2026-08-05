@@ -53,12 +53,41 @@
         <label class="primary-button" for="filePicker">选择一份 PDF</label>
         <p class="drop-hint">拖入 PDF，或点击按钮打开</p>
 
-        <section id="homeEcho" class="home-echo" aria-label="阅读回声" hidden>
-          <div class="home-section-heading">
-            <p class="home-eyebrow">Reading Echo</p>
-            <h2>最近在读什么书？</h2>
+        <section id="homeEcho" class="home-echo" aria-label="从书架取书" hidden>
+          <div class="book-shelf-backdrop" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span>
           </div>
-          <div id="recentBooks" class="recent-books"></div>
+
+          <div class="home-section-heading">
+            <p class="home-eyebrow">THE NIGHT SHELF · READING ECHO</p>
+            <h2>今晚，从哪一页继续？</h2>
+            <p class="home-section-note">左右选择，回车取书；最近的阅读只在本机留下书签。</p>
+          </div>
+
+          <div class="book-carousel-frame">
+            <button id="bookPrev" class="book-carousel-arrow is-prev" type="button" aria-label="选择左边一本书">‹</button>
+            <div
+              id="recentBooks"
+              class="recent-books"
+              role="listbox"
+              aria-label="最近阅读与打开新书"
+              aria-describedby="bookSelectionMeta"
+              tabindex="0"
+            ></div>
+            <button id="bookNext" class="book-carousel-arrow is-next" type="button" aria-label="选择右边一本书">›</button>
+            <div class="book-stage-line" aria-hidden="true"></div>
+          </div>
+
+          <div class="book-selection-copy" aria-live="polite">
+            <p id="bookSelectionTitle" class="book-selection-title">打开一本新书</p>
+            <p id="bookSelectionMeta" class="book-selection-meta">选择或拖入 PDF，开始新的阅读。</p>
+          </div>
+
+          <div class="book-opening-actions">
+            <button id="takeBook" class="take-book-button" type="button">取下这本书</button>
+            <button id="openNewBook" class="open-new-book-button" type="button">另取新书</button>
+          </div>
+
           <p id="resumeHint" class="resume-hint" hidden></p>
           <div id="rhythmEcho" class="rhythm-echo" hidden></div>
           <button id="clearRecords" class="ghost-button" type="button">清除本机阅读回声</button>

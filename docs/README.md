@@ -21,6 +21,10 @@
 
 [`v4-hisheng/README.md`](./v4-hisheng/README.md) 汇总 v4 的产品设计、实现说明、模型实验与发布记录。
 
+## v5「航迹」资料
+
+[`v5-hangji/README.md`](./v5-hangji/README.md) 记录自由套索、情绪航迹、回流机制、混合 AI 与 Zotero / Obsidian 归档的已确认产品边界。当前为规划阶段，不代表 v4.0.0 已交付能力。
+
 带有 PRD、IMPLEMENTATION 或 ENGINEERING_LOG 的文档是公开设计历史，用于解释方案演进，不承担当前任务管理。若历史资料与当前实现冲突，以代码、根目录 README 和 CHANGELOG 为准。
 
 个人 PDF、设备信息、内部工作区状态、模型缓存、生成音频和安装包不作为项目文档提交。

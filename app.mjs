@@ -33,6 +33,7 @@ import {
   unitsPerMinute,
 } from "./reading-model.mjs";
 import { createReadingClockSnapshot } from "./reading-clock.mjs";
+import { createReflowController } from "./reflow-controller.mjs";
 import { createRhythmSnapshot } from "./reading-rhythm.mjs";
 import { segmentsToReadableChunks } from "./readable-chunk.mjs";
 import { createSpeedCueEngine } from "./sound-engine.mjs";
@@ -203,6 +204,10 @@ let playing = true;
 let wasPlayingBeforeHidden = false;
 let speed = localState.preferences.defaultSpeedPxPerSecond;
 elements.speed.value = String(speed);
+let lastFlowSpeed = speed;
+let pausedAt = Date.now();
+let hiddenAt = null;
+const readingReflow = createReflowController();
 let easedSpeed = 0;
 let scrollCarry = 0;
 let lastFrame = 0;
@@ -377,8 +382,8 @@ const traceCapture = createTraceCaptureController({
     null
   ),
   getSpeedContext: () => ({
-    speedTier: speedTier(speed).themeKey,
-    speedPxPerSecond: speed,
+    speedTier: speedTier(lastFlowSpeed).themeKey,
+    speedPxPerSecond: lastFlowSpeed,
   }),
   onPause: () => {
     setPlaying(false, { cancelSpeech: false });
@@ -391,9 +396,11 @@ const traceCapture = createTraceCaptureController({
       fade: true,
     });
   },
-  onReturnToFlow: () => {
-    // Stage 8 replaces this current-speed resume with the frozen 30/90s curve.
-    setPlaying(true);
+  onReturnToFlow: ({ interruptionMs }) => {
+    beginReadingReflow({
+      reason: "trace-return",
+      interruptionMs,
+    });
   },
 });
 
@@ -2399,8 +2406,45 @@ function handleReadingPageChange(pageNumber) {
   }
 }
 
+function cancelReadingReflow(reason = "user-intervention") {
+  const cancelled = readingReflow.cancel(reason, { now: performance.now() });
+  elements.speedExperience.dataset.motion = "idle";
+  elements.speedPixels.textContent = String(Math.round(speed));
+  if (elements.traceStatus?.textContent.includes("回到书流")) {
+    elements.traceStatus.hidden = true;
+    elements.traceStatus.textContent = "";
+  }
+  return cancelled;
+}
+
+function beginReadingReflow({ reason = "resume", interruptionMs = 0 } = {}) {
+  const snapshot = readingReflow.start({
+    currentSpeed: speed,
+    interruptionMs,
+    reason,
+    now: performance.now(),
+  });
+  setPlaying(true);
+  if (snapshot.active) {
+    elements.speedExperience.dataset.motion = "reflow";
+    if (elements.traceStatus) {
+      elements.traceStatus.hidden = false;
+      elements.traceStatus.textContent = snapshot.mode === "long"
+        ? "正在缓慢回到书流"
+        : "正在回到书流";
+    }
+  } else {
+    elements.speedExperience.dataset.motion = "idle";
+  }
+  return snapshot;
+}
+
 function setPlaying(next, { cancelSpeech = true } = {}) {
   if (next && traceCapture.snapshot().scrollHold) return;
+  if (!next) {
+    if (playing || readingReflow.snapshot().active) pausedAt = Date.now();
+    cancelReadingReflow("paused");
+  }
   playing = next;
   if (!playing && cancelSpeech) {
     cancelSpeechSession("paused");
@@ -2719,6 +2763,7 @@ async function openPdf(sourceOrFactory, displayName, { fileMeta = null } = {}) {
   clearTextSession();
   activeTraceDocument = null;
   traceCapture.reset("document-changing");
+  cancelReadingReflow("document-changing");
   diagnosticsSession = {
     startedAt: performance.now(),
     metadataReadyMs: null,
@@ -2874,6 +2919,7 @@ async function openPdf(sourceOrFactory, displayName, { fileMeta = null } = {}) {
   elements.controls.hidden = false;
   elements.finish.hidden = false;
   updateReadingStatus(true);
+  beginReadingReflow({ reason: "new-document" });
 }
 
 function currentPageNumber() {
@@ -3064,13 +3110,32 @@ function animate(timestamp) {
   const elapsed = Math.min(64, timestamp - lastFrame);
   lastFrame = timestamp;
 
+  let automaticSpeed = speed;
+  const reflow = readingReflow.sample(timestamp);
+  if (reflow) {
+    automaticSpeed = reflow.speed;
+    elements.speedPixels.textContent = String(Math.round(automaticSpeed));
+    if (reflow.done) {
+      speed = reflow.targetSpeed;
+      automaticSpeed = speed;
+      elements.speed.value = String(speed);
+      elements.speedExperience.dataset.motion = "idle";
+      updateSpeedPresentation("initial");
+      schedulePersistReadingRecord();
+      if (elements.traceStatus?.textContent.includes("回到书流")) {
+        elements.traceStatus.hidden = true;
+        elements.traceStatus.textContent = "";
+      }
+    }
+  }
   const desiredSpeed = (
     readyToMove &&
     playing &&
     !pointReadScrollHold &&
     !traceCapture.snapshot().scrollHold &&
     !document.hidden
-  ) ? speed : 0;
+  ) ? automaticSpeed : 0;
+  if (desiredSpeed > 0) lastFlowSpeed = desiredSpeed;
   const easing = 1 - Math.exp(-elapsed / 420);
   easedSpeed += (desiredSpeed - easedSpeed) * easing;
 
@@ -3103,10 +3168,18 @@ elements.toggle.addEventListener("click", () => {
     elements.viewport.scrollTop + elements.viewport.clientHeight >=
     elements.viewport.scrollHeight - 4;
   if (!playing && atEnd) elements.viewport.scrollTo({ top: 0, behavior: "smooth" });
-  setPlaying(!playing);
+  if (playing) {
+    setPlaying(false);
+  } else {
+    beginReadingReflow({
+      reason: "resume",
+      interruptionMs: Math.max(0, Date.now() - pausedAt),
+    });
+  }
 });
 
 elements.speed.addEventListener("input", () => {
+  cancelReadingReflow("speed-changed");
   interruptPointReadForUser("speed-changed");
   const previousSpeed = speed;
   speed = Number(elements.speed.value);
@@ -3665,7 +3738,7 @@ document.addEventListener("drop", (event) => {
 
 elements.backToTop.addEventListener("click", () => {
   elements.viewport.scrollTo({ top: 0, behavior: "smooth" });
-  setPlaying(true);
+  beginReadingReflow({ reason: "new-document" });
 });
 
 elements.viewport.addEventListener("scroll", () => updateReadingStatus(true), {
@@ -3673,15 +3746,18 @@ elements.viewport.addEventListener("scroll", () => updateReadingStatus(true), {
 });
 
 elements.viewport.addEventListener("wheel", () => {
+  cancelReadingReflow("user-scroll");
   interruptPointReadForUser("user-scroll");
 }, { passive: true });
 
 elements.viewport.addEventListener("touchstart", () => {
+  cancelReadingReflow("touch-scroll");
   interruptPointReadForUser("touch-scroll");
 }, { passive: true });
 
 elements.viewport.addEventListener("pointerdown", (event) => {
   if (event.target === elements.viewport) {
+    cancelReadingReflow("scrollbar-drag");
     interruptPointReadForUser("scrollbar-drag");
   }
 }, { capture: true });
@@ -3731,6 +3807,7 @@ window.addEventListener("keydown", (event) => {
     "Home",
     "End",
   ].includes(event.code)) {
+    cancelReadingReflow("keyboard-scroll");
     interruptPointReadForUser("keyboard-scroll");
   }
   if (event.code === "Space") {
@@ -3765,6 +3842,8 @@ window.addEventListener("beforeunload", () => {
 
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
+    hiddenAt = Date.now();
+    cancelReadingReflow("document-hidden");
     const pointInterrupted = interruptPointReadForUser("document-hidden");
     wasPlayingBeforeHidden = pointInterrupted ? false : playing;
   } else if (
@@ -3772,7 +3851,11 @@ document.addEventListener("visibilitychange", () => {
     readyToMove &&
     !traceCapture.snapshot().scrollHold
   ) {
-    setPlaying(true);
+    beginReadingReflow({
+      reason: "app-resume",
+      interruptionMs: hiddenAt === null ? 0 : Math.max(0, Date.now() - hiddenAt),
+    });
+    hiddenAt = null;
   }
 });
 

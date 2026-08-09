@@ -153,3 +153,19 @@
 - Node 完整回归 347 / 347，Electron smoke 通过。
 
 详细记录见 [`stage-7-emotion-coordinate/README.md`](./stage-7-emotion-coordinate/README.md)。
+
+## 2026-08-09：阶段 8 显式回流复核
+
+结论：30 / 90 秒 smoothstep、档内目标、长暂停判断、显式触发与手动取消均已接入；阅读中核心闭环在技术上成立，主观自然度留给阶段 10 真实阅读。
+
+关键证据：
+
+- 16 px/s 短中断 15 秒样本为 18，30 秒终点为 20；
+- 新书和长中断使用 90 秒；
+- 所有目标不跨档且不降低用户已有高速度；
+- 套索返回在 Electron 中启动 reflow；
+- WheelEvent 立即取消，motion 变 idle，状态文字清空；
+- 取消后播放继续，不自动重启曲线；
+- 暂停、调速、触摸、键盘、后台和换书路径均有显式 cancel 连接。
+
+详细记录见 [`stage-8-explicit-reflow/README.md`](./stage-8-explicit-reflow/README.md)。

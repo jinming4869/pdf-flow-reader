@@ -103,6 +103,7 @@ export function createTraceCaptureController({
   let activeShell = null;
   let activePointerId = null;
   let lassoLayer = null;
+  let armedAt = null;
   let latestTrace = null;
   let emotionCoordinate = null;
   let emotionMutationPending = 0;
@@ -218,6 +219,7 @@ export function createTraceCaptureController({
           onCancelSpeech();
           break;
         case "FREEZE_VIEWPORT":
+          armedAt = Date.now();
           setStatus("用墨线圈住这一页的一瞬；Esc 取消");
           break;
         case "DISCARD_GESTURE":
@@ -240,7 +242,11 @@ export function createTraceCaptureController({
           panel.hidden = true;
           clearPreview();
           clearLassoLayer();
-          onReturnToFlow({ traceId: effect.traceId });
+          onReturnToFlow({
+            traceId: effect.traceId,
+            interruptionMs: armedAt === null ? 0 : Math.max(0, Date.now() - armedAt),
+          });
+          armedAt = null;
           break;
         case "ABORT_TRACE_SESSION":
           panel.hidden = true;
@@ -461,19 +467,21 @@ export function createTraceCaptureController({
   }
 
   function cancel(reason = "cancelled") {
+    let accepted = false;
     if (["armed", "drawing"].includes(session.phase)) {
-      return dispatch({ type: "CANCEL", reason }).accepted;
+      accepted = dispatch({ type: "CANCEL", reason }).accepted;
+    } else if (session.phase !== "idle") {
+      accepted = dispatch({ type: "RESET", reason }).accepted;
     }
-    if (session.phase !== "idle") {
-      return dispatch({ type: "RESET", reason }).accepted;
-    }
-    return false;
+    if (accepted) armedAt = null;
+    return accepted;
   }
 
   function reset(reason = "reset") {
     dispatch({ type: "RESET", reason });
     activeShell = null;
     activePointerId = null;
+    armedAt = null;
     latestTrace = null;
     clearPreview();
     clearEmotion();

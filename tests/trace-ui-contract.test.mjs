@@ -35,6 +35,9 @@ test("app connects the isolated trace controller without embedding geometry logi
   assert.match(app, /pdf\.fingerprints/);
   assert.match(app, /traceCapture\.snapshot\(\)\.scrollHold/);
   assert.match(app, /emotionPad/);
+  assert.match(app, /createReflowController/);
+  assert.match(app, /cancelReadingReflow/);
+  assert.doesNotMatch(app, /Stage 8 replaces this current-speed resume/);
   assert.doesNotMatch(app, /function\s+prepareLassoPath/);
   assert.doesNotMatch(app, /function\s+renderLassoCrop/);
 });

@@ -583,10 +583,35 @@ async function run() {
       productWindow,
       `document.querySelector("#tracePanel").hidden && !document.querySelector("#viewport").classList.contains("is-trace-frozen")`,
     );
+    await waitFor(
+      productWindow,
+      `document.querySelector("#speedExperience").dataset.motion === "reflow"`,
+    );
     uiTraceCapture.afterReturn = await productWindow.webContents.executeJavaScript(`(() => ({
       panelHidden: document.querySelector("#tracePanel").hidden,
       viewportFrozen: document.querySelector("#viewport").classList.contains("is-trace-frozen"),
       buttonPressed: document.querySelector("#traceLassoButton").getAttribute("aria-pressed"),
+      reflowMotion: document.querySelector("#speedExperience").dataset.motion,
+      reflowStatus: document.querySelector("#traceStatus").textContent,
+    }))()`, true);
+    await productWindow.webContents.executeJavaScript(`(() => {
+      document.querySelector("#viewport").dispatchEvent(new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY: 24,
+      }));
+      return true;
+    })()`, true);
+    await waitFor(
+      productWindow,
+      `document.querySelector("#speedExperience").dataset.motion === "idle"`,
+    );
+    const reflowProbe = await productWindow.webContents.executeJavaScript(`(() => ({
+      startedMotion: "reflow",
+      cancelledMotion: document.querySelector("#speedExperience").dataset.motion,
+      cancelledStatus: document.querySelector("#traceStatus").textContent,
+      playbackLabel: document.querySelector("#toggleText").textContent,
+      viewportFrozen: document.querySelector("#viewport").classList.contains("is-trace-frozen"),
     }))()`, true);
     uiTraceCapture.cancelProbe = await productWindow.webContents.executeJavaScript(`(async () => {
       const panel = document.querySelector("#tracePanel");
@@ -636,6 +661,7 @@ async function run() {
       ipc,
       traceBridge,
       uiTraceCapture,
+      reflowProbe,
       cropProbe,
       shelf,
       restartPersistence,

@@ -1,6 +1,6 @@
 # v5「航迹」线性实施工作流
 
-状态：**阶段 7 已完成；下一步为阶段 8 显式回流曲线**
+状态：**阶段 8 已完成；下一步为阶段 9 单书航迹**
 
 当前优先级：先做到产品所有者本机 macOS 稳定运行，再处理 Windows 与 GitHub 公开发布适配。
 
@@ -84,7 +84,11 @@
 - [x] pointer PLACE_EMOTION 与键盘 REVISE_EMOTION 保留 original/current
 - [x] crop / emotion mutation queue 通过真实 Electron 并发验证
 - [x] Node 完整回归 347 / 347
-- [ ] 用 30 / 90 秒可取消曲线替换临时直接恢复
+- [x] 实现档内 0.82 目标、30 / 90 秒 smoothstep 与十分钟阈值
+- [x] 接入套索返回、新书、暂停恢复、后台恢复与从头再读
+- [x] 滚轮、触摸、键盘、调速、暂停和换书立即取消
+- [x] Electron reflow start / WheelEvent cancel smoke 通过
+- [ ] 实现单书航迹散点、详情、修正、回收站与原页回跳
 
 ## 5. 阶段报告模板
 

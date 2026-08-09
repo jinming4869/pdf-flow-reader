@@ -1,6 +1,6 @@
 # v5「航迹」线性实施工作流
 
-状态：**阶段 6 已完成；下一步为阶段 7 连续情绪坐标**
+状态：**阶段 7 已完成；下一步为阶段 8 显式回流曲线**
 
 当前优先级：先做到产品所有者本机 macOS 稳定运行，再处理 Windows 与 GitHub 公开发布适配。
 
@@ -80,7 +80,11 @@
 - [x] 接入丝带环、L / Esc、SVG 墨线、自动暂停与视口冻结
 - [x] 正式 UI 完成 draft、PNG、预览与取消不留痕
 - [x] Node 完整回归 342 / 342，Electron UI smoke 通过
-- [ ] 接入连续效价 × 唤醒情绪坐标与 PLACE_EMOTION
+- [x] 接入连续效价 × 唤醒平面、marker、邻域词与 aria-valuetext
+- [x] pointer PLACE_EMOTION 与键盘 REVISE_EMOTION 保留 original/current
+- [x] crop / emotion mutation queue 通过真实 Electron 并发验证
+- [x] Node 完整回归 347 / 347
+- [ ] 用 30 / 90 秒可取消曲线替换临时直接恢复
 
 ## 5. 阶段报告模板
 

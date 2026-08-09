@@ -204,3 +204,15 @@ app.mjs 只提供暂停、TTS 取消、页面 chunks/canvas、速度上下文和
 ### D49：取消套索退出一次性模式并保持暂停
 
 L、Esc、右键、过短路径或跨页路径不创建 trace；解除视口冻结后播放状态仍为暂停，符合冻结需求 D29。
+
+### D50：情绪事实只存连续坐标
+
+邻域词、象限名称和 UI 文案都是可替换解释层，不进入 ReadingTrace；坐标保留三位小数并限制在 [-1, 1]。
+
+### D51：crop 与 emotion 共用单 trace mutation queue
+
+所有 revision 写入按最新 trace 串行；快速 pointer / keyboard 修改和异步 crop 不能互相覆盖。
+
+### D52：首次情绪与修正值分离
+
+PLACE_EMOTION 写入 original 与 current；REVISE_EMOTION 只更新 current。键盘和 pointer 使用同一事件契约。

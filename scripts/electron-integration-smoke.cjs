@@ -480,7 +480,36 @@ async function run() {
     })()`, true);
     await waitFor(
       productWindow,
-      `document.querySelector("#tracePanel")?.dataset.state === "saved" && !document.querySelector("#tracePreview").hidden`,
+      `document.querySelector("#tracePanel")?.dataset.state === "saved"`,
+      15_000,
+    );
+    await productWindow.webContents.executeJavaScript(`(() => {
+      const pad = document.querySelector("#emotionPad");
+      const rectangle = pad.getBoundingClientRect();
+      pad.dispatchEvent(new PointerEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 88,
+        pointerType: "mouse",
+        button: 0,
+        buttons: 1,
+        clientX: rectangle.left + rectangle.width * 0.75,
+        clientY: rectangle.top + rectangle.height * 0.25,
+      }));
+      pad.dispatchEvent(new PointerEvent("pointerup", {
+        bubbles: true,
+        pointerId: 88,
+        pointerType: "mouse",
+        button: 0,
+        buttons: 0,
+        clientX: rectangle.left + rectangle.width * 0.75,
+        clientY: rectangle.top + rectangle.height * 0.25,
+      }));
+      return true;
+    })()`, true);
+    await waitFor(
+      productWindow,
+      `!document.querySelector("#tracePreview").hidden && !document.querySelector("#emotionMarker").hidden && document.querySelector("#traceSummary").textContent.includes("情绪已落点")`,
       15_000,
     );
     const uiTraceCapture = await productWindow.webContents.executeJavaScript(`(async () => {
@@ -493,12 +522,56 @@ async function run() {
         documentId: panel.dataset.documentId,
         traceCount: response.value.length,
         cropState: trace?.crop?.state || null,
+        emotionState: trace?.emotion?.state || null,
+        emotionCoordinate: trace?.emotion?.current || null,
         sourceProvenance: trace?.source?.provenance || null,
+        emotionWords: document.querySelector("#emotionWords").textContent,
+        emotionValueText: document.querySelector("#emotionPad").getAttribute("aria-valuetext"),
         panelState: panel.dataset.state,
         previewVisible: !document.querySelector("#tracePreview").hidden,
         buttonPressed: document.querySelector("#traceLassoButton").getAttribute("aria-pressed"),
         viewportFrozen: document.querySelector("#viewport").classList.contains("is-trace-frozen"),
         summary: document.querySelector("#traceSummary").textContent,
+      };
+    })()`, true);
+    await productWindow.webContents.executeJavaScript(`(() => {
+      const pad = document.querySelector("#emotionPad");
+      pad.focus();
+      pad.dispatchEvent(new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        code: "ArrowLeft",
+        key: "ArrowLeft",
+      }));
+      return true;
+    })()`, true);
+    await waitFor(
+      productWindow,
+      `(async () => {
+        const panel = document.querySelector("#tracePanel");
+        const response = await window.nightStudyTrace.readTrace(
+          panel.dataset.documentId,
+          panel.dataset.traceId,
+        );
+        return Boolean(
+          document.querySelector("#emotionPad").getAttribute("aria-valuetext")?.includes("效价 0.45") &&
+          response?.ok &&
+          response.value?.emotion?.current?.valence === 0.45
+        );
+      })()`,
+    );
+    uiTraceCapture.keyboardAdjustment = await productWindow.webContents.executeJavaScript(`(async () => {
+      const panel = document.querySelector("#tracePanel");
+      const response = await window.nightStudyTrace.readTrace(
+        panel.dataset.documentId,
+        panel.dataset.traceId,
+      );
+      if (!response?.ok) throw new Error(response?.error?.message || "Unable to read trace.");
+      return {
+        emotionState: response.value.emotion.state,
+        original: response.value.emotion.original,
+        current: response.value.emotion.current,
+        words: document.querySelector("#emotionWords").textContent,
       };
     })()`, true);
     const traceCaptureScreenshot = await capture(productWindow, "electron-trace-saved.png");

@@ -180,8 +180,23 @@
         <button id="traceReturnButton" type="button">回到书流</button>
       </div>
       <img id="tracePreview" class="trace-preview" alt="" hidden />
+      <div
+        id="emotionPad"
+        class="emotion-pad"
+        role="application"
+        tabindex="0"
+        aria-label="情绪坐标：左右选择效价，上下选择唤醒；方向键微调，Shift 加速"
+        aria-describedby="emotionWords"
+      >
+        <span class="emotion-axis emotion-axis-negative">负面效价</span>
+        <span class="emotion-axis emotion-axis-positive">正面效价</span>
+        <span class="emotion-axis emotion-axis-high">高唤醒</span>
+        <span class="emotion-axis emotion-axis-low">低唤醒</span>
+        <span id="emotionMarker" class="emotion-marker" aria-hidden="true" hidden></span>
+      </div>
+      <div id="emotionWords" class="emotion-words" role="status" aria-live="polite">尚未落点</div>
       <p id="traceSummary" class="trace-summary">正在保存路径与文字…</p>
-      <p class="trace-emotion-placeholder">情绪坐标待落点；即使暂时不填，痕迹也不会丢失。</p>
+      <p class="trace-emotion-placeholder">点击平面或用方向键留下坐标；暂时不填也能回到书流。</p>
     </aside>
 
     <aside id="ocrDock" class="ocr-dock" aria-label="OCR 扫描增强" hidden>

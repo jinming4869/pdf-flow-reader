@@ -1,4 +1,11 @@
 import {
+  emotionFromPadPoint,
+  emotionMarkerPosition,
+  moveEmotionCoordinate,
+  nearbyEmotionWords,
+  normalizeEmotionCoordinate,
+} from "./emotion-coordinate.mjs";
+import {
   normalizePointerToPage,
   prepareLassoPath,
   sampleLassoPoint,
@@ -84,6 +91,9 @@ export function createTraceCaptureController({
   const panel = requiredElement(elements?.panel, "panel");
   const preview = requiredElement(elements?.preview, "preview");
   const summary = requiredElement(elements?.summary, "summary");
+  const emotionPad = requiredElement(elements?.emotionPad, "emotionPad");
+  const emotionMarker = requiredElement(elements?.emotionMarker, "emotionMarker");
+  const emotionWords = requiredElement(elements?.emotionWords, "emotionWords");
   const returnButton = requiredElement(elements?.returnButton, "returnButton");
   const pages = requiredElement(elements?.pages, "pages");
   const viewport = requiredElement(elements?.viewport, "viewport");
@@ -94,7 +104,10 @@ export function createTraceCaptureController({
   let activePointerId = null;
   let lassoLayer = null;
   let latestTrace = null;
+  let emotionCoordinate = null;
+  let emotionMutationPending = 0;
   let previewUrl = null;
+  let traceMutationQueue = Promise.resolve();
 
   const desktopAvailable = Boolean(traceClient?.available);
 
@@ -119,6 +132,41 @@ export function createTraceCaptureController({
     preview.hidden = true;
   }
 
+  function renderEmotion(coordinate = emotionCoordinate, { saving = false } = {}) {
+    emotionCoordinate = normalizeEmotionCoordinate(coordinate);
+    emotionPad.dataset.saving = String(Boolean(saving));
+    const position = emotionMarkerPosition(emotionCoordinate);
+    if (!position) {
+      emotionMarker.hidden = true;
+      emotionWords.textContent = "尚未落点";
+      emotionPad.removeAttribute("aria-valuetext");
+      return;
+    }
+    emotionMarker.hidden = false;
+    emotionMarker.style.left = `${position.leftPercent}%`;
+    emotionMarker.style.top = `${position.topPercent}%`;
+    const words = nearbyEmotionWords(emotionCoordinate);
+    emotionWords.textContent = words.join(" · ");
+    emotionPad.setAttribute(
+      "aria-valuetext",
+      `效价 ${emotionCoordinate.valence.toFixed(2)}，唤醒 ${emotionCoordinate.arousal.toFixed(2)}；${words.join("、")}`,
+    );
+  }
+
+  function updateTraceSummary() {
+    if (!latestTrace) return;
+    const page = latestTrace.pageIndex + 1;
+    const crop = latestTrace.crop.state === "ready" ? "截图已保存" : "裁图待恢复";
+    const emotion = latestTrace.emotion.state === "unplaced" ? "情绪待落点" : "情绪已落点";
+    summary.textContent = `第 ${page} 页 · ${crop} · ${emotion}`;
+  }
+
+  function clearEmotion() {
+    emotionCoordinate = null;
+    emotionMutationPending = 0;
+    renderEmotion(null);
+  }
+
   function clearLassoLayer() {
     lassoLayer?.svg?.remove();
     lassoLayer = null;
@@ -134,13 +182,16 @@ export function createTraceCaptureController({
     viewport.classList.toggle("is-trace-frozen", active);
     panel.hidden = !["saving", "save-error", "reviewing"].includes(session.phase);
     returnButton.disabled = session.phase !== "reviewing";
+    emotionPad.tabIndex = session.phase === "reviewing" ? 0 : -1;
+    emotionPad.setAttribute("aria-disabled", String(session.phase !== "reviewing"));
     if (!active) clearLassoLayer();
   }
 
   function showReview(traceId) {
     panel.hidden = false;
     panel.dataset.state = "saved";
-    summary.textContent = `第 ${Number(latestTrace?.pageIndex ?? 0) + 1} 页 · 情绪待落点`;
+    updateTraceSummary();
+    renderEmotion(latestTrace?.emotion?.current ?? null);
     returnButton.disabled = false;
     setStatus("这一刻已先留在本机");
     clearLassoLayer();
@@ -150,6 +201,7 @@ export function createTraceCaptureController({
 
   function showSaveError(errorCode) {
     panel.hidden = false;
+    clearEmotion();
     panel.dataset.state = "error";
     summary.textContent = `痕迹尚未写入 · ${errorCode}`;
     returnButton.disabled = true;
@@ -210,29 +262,56 @@ export function createTraceCaptureController({
     return result;
   }
 
-  async function markCropFailed(trace, error) {
-    if (!trace || !documentRecord) return;
+  function enqueueTraceMutation(documentId, traceId, mutation) {
+    const run = traceMutationQueue
+      .catch(() => {})
+      .then(async () => {
+        const current = latestTrace?.id === traceId
+          ? latestTrace
+          : await traceClient.readTrace(documentId, traceId);
+        if (!current) throw new Error(`找不到 trace ${traceId}。`);
+        const next = await mutation(current);
+        if (documentRecord?.id === documentId && latestTrace?.id === traceId) {
+          latestTrace = next;
+          if (emotionMutationPending === 0 || next.emotion.state !== "unplaced") {
+            emotionCoordinate = next.emotion.current;
+            renderEmotion(emotionCoordinate);
+          }
+          updateTraceSummary();
+        }
+        return next;
+      });
+    traceMutationQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  async function markCropFailed(trace, error, documentId) {
+    if (!trace || !documentId) return;
     try {
-      latestTrace = await traceClient.transitionTrace(
-        documentRecord.id,
-        trace.id,
-        {
-          type: "CROP_FAILED",
-          errorCode: typeof error?.code === "string" ? error.code : "TRACE_CROP_FAILED",
-        },
-        { expectedRevision: trace.revision },
-      );
-      summary.textContent = `第 ${trace.pageIndex + 1} 页 · 裁图待恢复 · 情绪待落点`;
+      await enqueueTraceMutation(documentId, trace.id, (current) => (
+        traceClient.transitionTrace(
+          documentId,
+          trace.id,
+          {
+            type: "CROP_FAILED",
+            errorCode: typeof error?.code === "string" ? error.code : "TRACE_CROP_FAILED",
+          },
+          { expectedRevision: current.revision },
+        )
+      ));
       setStatus("痕迹文字与路径已保存；裁图稍后可以重试");
     } catch (transitionError) {
       setStatus(`裁图失败：${transitionError.code ?? "TRACE_CROP_FAILED"}`);
     }
   }
 
-  async function persistCrop(trace, shell, path) {
+  async function persistCrop(trace, shell, path, documentId) {
     const sourceCanvas = getPageCanvas(trace.pageIndex + 1, shell);
     if (!sourceCanvas) {
-      await markCropFailed(trace, { code: "PAGE_CANVAS_UNAVAILABLE" });
+      await markCropFailed(trace, { code: "PAGE_CANVAS_UNAVAILABLE" }, documentId);
       return;
     }
     try {
@@ -242,26 +321,27 @@ export function createTraceCaptureController({
         padding: Math.max(12, Math.round((globalThis.devicePixelRatio || 1) * 12)),
       });
       const bytes = new Uint8Array(await crop.blob.arrayBuffer());
-      latestTrace = await traceClient.saveCrop(
-        documentRecord.id,
-        trace.id,
-        bytes,
-        {
-          mimeType: crop.mimeType,
-          width: crop.width,
-          height: crop.height,
-          expectedRevision: trace.revision,
-        },
-      );
+      await enqueueTraceMutation(documentId, trace.id, (current) => (
+        traceClient.saveCrop(
+          documentId,
+          trace.id,
+          bytes,
+          {
+            mimeType: crop.mimeType,
+            width: crop.width,
+            height: crop.height,
+            expectedRevision: current.revision,
+          },
+        )
+      ));
       clearPreview();
       previewUrl = URL.createObjectURL(crop.blob);
       preview.src = previewUrl;
       preview.alt = `第 ${trace.pageIndex + 1} 页航迹裁图`;
       preview.hidden = false;
-      summary.textContent = `第 ${trace.pageIndex + 1} 页 · 截图已保存 · 情绪待落点`;
       setStatus("截图、文字和路径已经留在本机");
     } catch (error) {
-      await markCropFailed(trace, error);
+      await markCropFailed(trace, error, documentId);
     }
   }
 
@@ -280,11 +360,12 @@ export function createTraceCaptureController({
     const selectedText = selectLassoText(getPageChunks(pageNumber), prepared.path);
     const speed = getSpeedContext();
     const shell = activeShell;
+    const targetDocument = documentRecord;
     try {
       const trace = await traceClient.createDraft({
         id: createId(),
-        documentId: documentRecord.id,
-        documentFingerprint: documentRecord.fingerprint,
+        documentId: targetDocument.id,
+        documentFingerprint: targetDocument.fingerprint,
         pageIndex: effect.pageIndex,
         lassoPath: prepared.path,
         sourceText: selectedText.text,
@@ -292,14 +373,22 @@ export function createTraceCaptureController({
         speedTier: speed.speedTier,
         speedPxPerSecond: speed.speedPxPerSecond,
       });
+      if (
+        documentRecord?.id !== targetDocument.id ||
+        effect.generation !== session.generation
+      ) {
+        return;
+      }
       latestTrace = trace;
+      emotionCoordinate = trace.emotion.current;
+      renderEmotion(emotionCoordinate);
       const saved = dispatch({
         type: "SAVE_SUCCEEDED",
         generation: effect.generation,
         traceId: trace.id,
       });
       if (!saved.accepted) return;
-      await persistCrop(trace, shell, prepared.path);
+      await persistCrop(trace, shell, prepared.path, targetDocument.id);
     } catch (error) {
       dispatch({
         type: "SAVE_FAILED",
@@ -307,6 +396,55 @@ export function createTraceCaptureController({
         errorCode: error?.code ?? "TRACE_SAVE_FAILED",
       });
     }
+  }
+
+  function placeEmotion(coordinate) {
+    const normalized = normalizeEmotionCoordinate(coordinate);
+    if (
+      !normalized ||
+      session.phase !== "reviewing" ||
+      !documentRecord ||
+      !latestTrace
+    ) {
+      return false;
+    }
+    const documentId = documentRecord.id;
+    const traceId = latestTrace.id;
+    emotionCoordinate = normalized;
+    emotionMutationPending += 1;
+    renderEmotion(normalized, { saving: true });
+    void enqueueTraceMutation(documentId, traceId, (current) => (
+      traceClient.transitionTrace(
+        documentId,
+        traceId,
+        {
+          type: current.emotion.state === "unplaced"
+            ? "PLACE_EMOTION"
+            : "REVISE_EMOTION",
+          valence: normalized.valence,
+          arousal: normalized.arousal,
+        },
+        { expectedRevision: current.revision },
+      )
+    )).then(() => {
+      emotionMutationPending = Math.max(0, emotionMutationPending - 1);
+      renderEmotion(emotionCoordinate, { saving: emotionMutationPending > 0 });
+      setStatus("情绪坐标已留在本机");
+    }).catch((error) => {
+      emotionMutationPending = Math.max(0, emotionMutationPending - 1);
+      emotionCoordinate = latestTrace?.emotion?.current ?? null;
+      renderEmotion(emotionCoordinate, { saving: emotionMutationPending > 0 });
+      setStatus(`情绪坐标保存失败：${error.code ?? "TRACE_EMOTION_FAILED"}`);
+    });
+    return true;
+  }
+
+  function emotionPoint(event) {
+    return emotionFromPadPoint({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      rectangle: emotionPad.getBoundingClientRect(),
+    });
   }
 
   function renderCurrentPath({ close = false } = {}) {
@@ -317,6 +455,7 @@ export function createTraceCaptureController({
   function arm() {
     if (!desktopAvailable || !documentRecord || session.phase !== "idle") return false;
     clearPreview();
+    clearEmotion();
     latestTrace = null;
     return dispatch({ type: "ARM" }).accepted;
   }
@@ -337,6 +476,7 @@ export function createTraceCaptureController({
     activePointerId = null;
     latestTrace = null;
     clearPreview();
+    clearEmotion();
     syncUi();
   }
 
@@ -462,6 +602,34 @@ export function createTraceCaptureController({
   returnButton.addEventListener("click", () => {
     dispatch({ type: "RETURN_TO_FLOW" });
   });
+  emotionPad.addEventListener("pointerdown", (event) => {
+    if (session.phase !== "reviewing") return;
+    const coordinate = emotionPoint(event);
+    if (!coordinate) return;
+    event.preventDefault();
+    setPointerCaptureSafely(emotionPad, event.pointerId);
+    placeEmotion(coordinate);
+  });
+  emotionPad.addEventListener("pointermove", (event) => {
+    if (session.phase !== "reviewing" || event.buttons !== 1) return;
+    const coordinate = emotionPoint(event);
+    if (!coordinate) return;
+    event.preventDefault();
+    placeEmotion(coordinate);
+  });
+  emotionPad.addEventListener("pointerup", (event) => {
+    releasePointerCaptureSafely(emotionPad, event.pointerId);
+  });
+  emotionPad.addEventListener("keydown", (event) => {
+    if (session.phase !== "reviewing") return;
+    const coordinate = moveEmotionCoordinate(emotionCoordinate, event.code, {
+      shiftKey: event.shiftKey,
+    });
+    if (!coordinate) return;
+    event.preventDefault();
+    event.stopPropagation();
+    placeEmotion(coordinate);
+  });
   pages.addEventListener("pointerdown", pointerDown, { capture: true });
   pages.addEventListener("pointermove", pointerMove, { capture: true, passive: false });
   pages.addEventListener("pointerup", pointerUp, { capture: true });
@@ -475,7 +643,9 @@ export function createTraceCaptureController({
 
   panel.hidden = true;
   preview.hidden = true;
+  emotionMarker.hidden = true;
   status.hidden = true;
+  clearEmotion();
   syncUi();
 
   return Object.freeze({

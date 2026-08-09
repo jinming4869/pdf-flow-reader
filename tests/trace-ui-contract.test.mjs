@@ -15,12 +15,17 @@ test("reader exposes one explicit ribbon-lasso surface and a minimal saved-trace
     "tracePanel",
     "tracePreview",
     "traceSummary",
+    "emotionPad",
+    "emotionMarker",
+    "emotionWords",
     "traceReturnButton",
   ]) {
     assert.match(html, new RegExp(`id=["']${id}["']`), id);
   }
   assert.match(html, /title=["'][^"']*L[^"']*["']/);
   assert.match(html, /回到书流/);
+  assert.match(html, /效价/);
+  assert.match(html, /唤醒/);
 });
 
 test("app connects the isolated trace controller without embedding geometry logic", () => {
@@ -29,6 +34,7 @@ test("app connects the isolated trace controller without embedding geometry logi
   assert.match(app, /createDocumentId/);
   assert.match(app, /pdf\.fingerprints/);
   assert.match(app, /traceCapture\.snapshot\(\)\.scrollHold/);
+  assert.match(app, /emotionPad/);
   assert.doesNotMatch(app, /function\s+prepareLassoPath/);
   assert.doesNotMatch(app, /function\s+renderLassoCrop/);
 });
@@ -38,6 +44,8 @@ test("trace controller is packaged and served while browser mode has a hidden en
   assert.match(styles, /\.trace-lasso-button/);
   assert.match(styles, /\.trace-lasso-layer/);
   assert.match(styles, /\.trace-panel/);
+  assert.match(styles, /\.emotion-pad/);
+  assert.match(styles, /\.emotion-marker/);
   assert.match(styles, /\.viewport\.is-trace-frozen/);
   assert.match(app, /traceClient\.available/);
 });

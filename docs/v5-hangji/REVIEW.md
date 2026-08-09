@@ -137,3 +137,19 @@
 - Node 完整回归 342 / 342，Electron UI smoke 通过。
 
 详细记录见 [`stage-6-draft-capture/README.md`](./stage-6-draft-capture/README.md)。
+
+## 2026-08-09：阶段 7 连续情绪坐标复核
+
+结论：连续效价 × 唤醒平面、pointer、键盘、邻域词、aria-valuetext 和持久化已接入；crop 与 emotion 并发不再产生 revision 覆盖，可以进入正式回流阶段。
+
+关键证据：
+
+- pointer 落点 75% × 25% 保存为 valence 0.5、arousal 0.5；
+- UI 与无障碍文字显示相同坐标和“振奋、惊喜、兴奋”；
+- ArrowLeft 把 current 改为 0.45 / 0.5；
+- original 仍为 0.5 / 0.5，emotionState 变为 revised；
+- cropState 同时保持 ready；
+- 未落点仍可直接返回；
+- Node 完整回归 347 / 347，Electron smoke 通过。
+
+详细记录见 [`stage-7-emotion-coordinate/README.md`](./stage-7-emotion-coordinate/README.md)。

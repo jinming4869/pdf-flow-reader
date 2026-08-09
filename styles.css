@@ -1890,8 +1890,94 @@ body.is-dragging::after {
   box-shadow: inset 0 0 0 1px rgba(71, 86, 77, 0.08);
 }
 
+.emotion-pad {
+  position: relative;
+  height: 154px;
+  margin-top: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(82, 117, 98, 0.18);
+  border-radius: 16px;
+  cursor: crosshair;
+  outline: none;
+  background:
+    linear-gradient(90deg, rgba(143, 95, 91, 0.18), transparent 48%, rgba(108, 151, 113, 0.2)),
+    linear-gradient(0deg, rgba(116, 126, 136, 0.2), transparent 48%, rgba(219, 158, 92, 0.2)),
+    #f8f3e8;
+  box-shadow: inset 0 0 28px rgba(255, 255, 255, 0.62);
+  touch-action: none;
+}
+
+.emotion-pad::before,
+.emotion-pad::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  background: rgba(68, 83, 74, 0.16);
+}
+
+.emotion-pad::before {
+  top: 50%;
+  right: 12px;
+  left: 12px;
+  height: 1px;
+}
+
+.emotion-pad::after {
+  top: 12px;
+  bottom: 12px;
+  left: 50%;
+  width: 1px;
+}
+
+.emotion-pad:focus-visible {
+  border-color: rgba(82, 117, 98, 0.55);
+  box-shadow: 0 0 0 3px rgba(82, 117, 98, 0.12);
+}
+
+.emotion-axis {
+  position: absolute;
+  z-index: 1;
+  color: rgba(52, 67, 59, 0.52);
+  font-size: 9px;
+  font-weight: 650;
+  pointer-events: none;
+}
+
+.emotion-axis-negative { left: 10px; bottom: 8px; }
+.emotion-axis-positive { right: 10px; bottom: 8px; }
+.emotion-axis-high { top: 8px; left: 50%; transform: translateX(-50%); }
+.emotion-axis-low { bottom: 8px; left: 50%; transform: translateX(-50%); }
+
+.emotion-marker {
+  position: absolute;
+  z-index: 3;
+  width: 18px;
+  height: 18px;
+  border: 3px solid rgba(255, 250, 240, 0.95);
+  border-radius: 50%;
+  background: #c76543;
+  box-shadow:
+    0 0 0 1px rgba(114, 60, 43, 0.38),
+    0 5px 13px rgba(99, 53, 38, 0.28);
+  transform: translate(-50%, -50%);
+  transition: left 120ms ease, top 120ms ease, transform 120ms ease;
+  pointer-events: none;
+}
+
+.emotion-pad[data-saving="true"] .emotion-marker {
+  transform: translate(-50%, -50%) scale(0.86);
+}
+
+.emotion-words {
+  min-height: 20px;
+  margin-top: 7px;
+  color: rgba(65, 83, 73, 0.72);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
 .trace-summary {
-  margin: 13px 0 0;
+  margin: 9px 0 0;
   color: rgba(41, 55, 47, 0.82);
   font-size: 12px;
   font-weight: 680;
@@ -2393,7 +2479,8 @@ body.is-dragging::after {
   .open-new-book-button,
   .trace-lasso-button,
   .trace-lasso-path,
-  .trace-panel {
+  .trace-panel,
+  .emotion-marker {
     animation: none !important;
     transition: none !important;
     transition-delay: 0ms !important;

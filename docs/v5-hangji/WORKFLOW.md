@@ -1,6 +1,6 @@
 # v5「航迹」线性实施工作流
 
-状态：**阶段 4 已完成；下一步为阶段 5 套索与裁图 PoC**
+状态：**阶段 5 已完成；下一步为阶段 6 草稿留痕接入**
 
 当前优先级：先做到产品所有者本机 macOS 稳定运行，再处理 Windows 与 GitHub 公开发布适配。
 
@@ -73,7 +73,11 @@
 - [x] 建立原子 trace repository、恢复、并发序号与 30 天回收站
 - [x] 建立正式 preload、来源受限 IPC 与 renderer trace client
 - [x] Node 完整回归 326 / 326，Electron product bridge smoke 通过
-- [ ] 验证套索几何、区域文字命中与高 DPR 裁图
+- [x] 验证套索采样、简化、平滑、面积与双栏文字命中
+- [x] 验证旋转 PDF canvas 与 3000×4000 大画布裁图
+- [x] 4M 输出像素预算、PNG 原子 saveCrop 与跨 IPC revision 通过
+- [x] Node 完整回归 339 / 339，Electron crop smoke 通过
+- [ ] 接入丝带环、墨线、自动暂停、草稿保存与最小暂停界面
 
 ## 5. 阶段报告模板
 

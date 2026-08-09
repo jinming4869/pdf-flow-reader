@@ -79,13 +79,13 @@ async function exists(path) {
   }
 }
 
-async function atomicWriteJson(path, value) {
+async function atomicWrite(path, content, encoding = undefined) {
   await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
   let handle = null;
   try {
     handle = await open(temporary, "wx", 0o600);
-    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
+    await handle.writeFile(content, encoding);
     await handle.sync();
     await handle.close();
     handle = null;
@@ -95,6 +95,35 @@ async function atomicWriteJson(path, value) {
     await rm(temporary, { force: true }).catch(() => {});
     throw error;
   }
+}
+
+async function atomicWriteJson(path, value) {
+  return atomicWrite(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function pngBytes(value) {
+  let bytes = null;
+  if (value instanceof Uint8Array) {
+    bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  } else if (value instanceof ArrayBuffer) {
+    bytes = new Uint8Array(value);
+  }
+  if (!bytes || bytes.byteLength < 8 || bytes.byteLength > 64 * 1024 * 1024) {
+    throw repositoryError("TRACE_CROP_BYTES_INVALID", "crop PNG 必须是 8 字节到 64MB 的二进制。", TypeError);
+  }
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (!signature.every((byte, index) => bytes[index] === byte)) {
+    throw repositoryError("TRACE_CROP_BYTES_INVALID", "crop 数据缺少 PNG 签名。", TypeError);
+  }
+  return bytes;
+}
+
+function cropDimension(value, name) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1) {
+    throw repositoryError("TRACE_CROP_METADATA_INVALID", `${name} 必须是正整数。`, TypeError);
+  }
+  return number;
 }
 
 async function readJson(path) {
@@ -295,6 +324,45 @@ export function createTraceRepository({ rootPath } = {}) {
     });
   }
 
+  async function saveCrop(documentId, traceId, value, metadata = {}, options = {}) {
+    const id = safeId(documentId, "documentId");
+    const trace = safeId(traceId, "traceId");
+    const bytes = pngBytes(value);
+    if (metadata.mimeType !== "image/png") {
+      throw repositoryError("TRACE_CROP_METADATA_INVALID", "v5.0 crop 只接受 image/png。", TypeError);
+    }
+    const width = cropDimension(metadata.width, "crop width");
+    const height = cropDimension(metadata.height, "crop height");
+
+    return withDocumentLock(id, async () => {
+      const current = await readTrace(id, trace);
+      if (!current) {
+        throw repositoryError("TRACE_NOT_FOUND", `找不到 traceId ${trace}。`, RangeError);
+      }
+      if (
+        Number.isInteger(options.expectedRevision) &&
+        options.expectedRevision !== current.revision
+      ) {
+        throw repositoryError(
+          "TRACE_REVISION_CONFLICT",
+          `trace ${trace} revision 已从 ${options.expectedRevision} 变为 ${current.revision}。`,
+          RangeError,
+        );
+      }
+      const reference = `traces/${trace}/crop.png`;
+      const next = transitionReadingTrace(current, {
+        type: "CROP_READY",
+        reference,
+        mimeType: "image/png",
+        width,
+        height,
+      }, options);
+      await atomicWrite(join(traceDirectory(id, trace), "crop.png"), bytes);
+      await atomicWriteJson(tracePath(id, trace), toReadingTraceRecord(next));
+      return next;
+    });
+  }
+
   async function transitionTrace(documentId, traceId, event, options = {}) {
     const id = safeId(documentId, "documentId");
     const trace = safeId(traceId, "traceId");
@@ -396,6 +464,7 @@ export function createTraceRepository({ rootPath } = {}) {
     createDraft,
     readTrace,
     listTraces,
+    saveCrop,
     transitionTrace,
     purgeExpired,
   });

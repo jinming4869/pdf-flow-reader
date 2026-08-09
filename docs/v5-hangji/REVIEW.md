@@ -104,3 +104,19 @@
 - Node 完整回归 326 / 326，Electron smoke 通过。
 
 详细记录见 [`stage-4-local-trace-store/README.md`](./stage-4-local-trace-store/README.md)。
+
+## 2026-08-09：阶段 5 套索与裁图 PoC 复核
+
+结论：归一化套索几何、双栏文字命中、旋转 PDF canvas、高 DPR 区域裁图和 PNG 原子持久化均已在本机形成证据，可以进入正式阅读界面接入。
+
+关键证据：
+
+- 页面外指针拒绝、采样去重、RDP 简化、Chaikin 平滑和面积门槛均有单元测试；
+- 双栏中缝不会把右栏文字带入左栏套索，native 与 OCR provenance 能形成 mixed；
+- 旋转合成 PDF source canvas 为 1880×1453，裁图正常；
+- 3000×4000 canvas 在 4M 输出预算下生成约 1.05MB PNG；
+- 最后一组 5 次 P50 69.6ms、P95 70ms、max 79ms，开发冷峰值约 172ms；
+- renderer PNG 已经通过正式 preload / IPC 原子写入 repository 并更新为 CROP_READY；
+- Node 完整回归 339 / 339，Electron smoke 通过。
+
+真实扫描书、复杂双栏和大型私人 PDF 仍需在阶段 6 与阶段 10 继续验收。详细记录见 [`stage-5-lasso-crop-poc/README.md`](./stage-5-lasso-crop-poc/README.md)。

@@ -33,6 +33,8 @@ test("smoke runner preserves the desktop security boundary and required probes",
   assert.match(runner, /restartPersistence/);
   assert.match(runner, /traceBridge/);
   assert.match(runner, /conflictCode/);
+  assert.match(runner, /cropProbe/);
+  assert.match(runner, /renderLassoCrop/);
   assert.match(runner, /electron-preload\.cjs/);
   assert.match(runner, /canvas\.page-canvas/);
   assert.match(preload, /contextBridge\.exposeInMainWorld/);

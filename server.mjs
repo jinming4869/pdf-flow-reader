@@ -20,6 +20,8 @@ function createStaticFiles(appRoot) {
     ["/reading-trace.mjs", [join(appRoot, "reading-trace.mjs"), "text/javascript; charset=utf-8"]],
     ["/trace-session.mjs", [join(appRoot, "trace-session.mjs"), "text/javascript; charset=utf-8"]],
     ["/trace-client.mjs", [join(appRoot, "trace-client.mjs"), "text/javascript; charset=utf-8"]],
+    ["/lasso-geometry.mjs", [join(appRoot, "lasso-geometry.mjs"), "text/javascript; charset=utf-8"]],
+    ["/trace-crop.mjs", [join(appRoot, "trace-crop.mjs"), "text/javascript; charset=utf-8"]],
     ["/chunk-coordinate.mjs", [join(appRoot, "chunk-coordinate.mjs"), "text/javascript; charset=utf-8"]],
     ["/http-range.mjs", [join(appRoot, "http-range.mjs"), "text/javascript; charset=utf-8"]],
     ["/pdf-source.mjs", [join(appRoot, "pdf-source.mjs"), "text/javascript; charset=utf-8"]],

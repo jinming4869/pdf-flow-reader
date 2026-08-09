@@ -14,6 +14,7 @@ test("renderer trace client unwraps successful desktop envelopes", async () => {
     createDraft: (input) => success({ ...input, revision: 1 }),
     readTrace: (_documentId, traceId) => success({ id: traceId }),
     listTraces: () => success([{ id: "trace-1" }]),
+    saveCrop: (_documentId, traceId) => success({ id: traceId, crop: { state: "ready" } }),
     transitionTrace: (_documentId, traceId) => success({ id: traceId, revision: 2 }),
     pathForFile: () => "/books/A.pdf",
   };
@@ -25,6 +26,12 @@ test("renderer trace client unwraps successful desktop envelopes", async () => {
   assert.equal((await client.createDraft({ id: "trace-a" })).revision, 1);
   assert.equal((await client.readTrace("doc-a", "trace-a")).id, "trace-a");
   assert.equal((await client.listTraces("doc-a")).length, 1);
+  assert.equal((await client.saveCrop(
+    "doc-a",
+    "trace-a",
+    Uint8Array.from([137, 80, 78, 71]),
+    { mimeType: "image/png", width: 10, height: 10 },
+  )).crop.state, "ready");
   assert.equal((await client.transitionTrace("doc-a", "trace-a", { type: "TRASH" })).revision, 2);
   assert.equal(client.pathForFile({}), "/books/A.pdf");
 });

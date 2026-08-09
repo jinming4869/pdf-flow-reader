@@ -74,6 +74,36 @@ test("repository registers a document and atomically creates a readable draft", 
   );
 });
 
+test("repository atomically stores a PNG crop and updates the trace reference", async (t) => {
+  const { rootPath, repository } = fixture(t);
+  await repository.initialize();
+  await registerDocument(repository);
+  const created = await repository.createDraft(draftInput("trace-crop"));
+  const bytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4]);
+
+  const ready = await repository.saveCrop(
+    "doc-a",
+    "trace-crop",
+    bytes,
+    { mimeType: "image/png", width: 1200, height: 800 },
+    { expectedRevision: created.revision, now: new Date("2026-08-09T12:02:00Z") },
+  );
+  assert.equal(ready.crop.state, "ready");
+  assert.equal(ready.crop.reference, "traces/trace-crop/crop.png");
+  assert.equal(ready.revision, 2);
+  assert.deepEqual(
+    [...readFileSync(join(rootPath, "documents", "doc-a", "traces", "trace-crop", "crop.png"))],
+    [...bytes],
+  );
+  await assert.rejects(repository.saveCrop(
+    "doc-a",
+    "trace-crop",
+    bytes,
+    { mimeType: "image/png", width: 1200, height: 800 },
+    { expectedRevision: 1 },
+  ), { code: "TRACE_REVISION_CONFLICT" });
+});
+
 test("document relocation preserves identity while a fingerprint mismatch is rejected", async (t) => {
   const { repository } = fixture(t);
   await repository.initialize();

@@ -51,6 +51,9 @@ export function createTraceClient(bridge = globalThis.nightStudyTrace ?? null) {
     listTraces(documentId, options) {
       return call("listTraces", [documentId, options]);
     },
+    saveCrop(documentId, traceId, bytes, metadata) {
+      return call("saveCrop", [documentId, traceId, bytes, metadata]);
+    },
     transitionTrace(documentId, traceId, event, options) {
       return call("transitionTrace", [documentId, traceId, event, options]);
     },

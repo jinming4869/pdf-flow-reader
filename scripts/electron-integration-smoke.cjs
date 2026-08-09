@@ -40,7 +40,7 @@ function createSyntheticPdf(filePath) {
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Rotate 90 /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
     `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
   ];
@@ -281,10 +281,78 @@ async function run() {
       documentName: document.querySelector("#documentName").textContent,
       pageStatus: document.querySelector("#pageStatus").textContent,
       canvasCount: document.querySelectorAll("canvas.page-canvas").length,
+      canvasSize: (() => {
+        const canvas = document.querySelector("canvas.page-canvas");
+        return [canvas.width, canvas.height];
+      })(),
       renderedShellCount: document.querySelectorAll(".page-shell.rendered").length,
       errorHidden: document.querySelector("#errorPanel").hidden,
     }))()`, true);
     const readerCapture = await capture(restartedWindow, "electron-reader.png");
+    const cropProbe = await restartedWindow.webContents.executeJavaScript(`(async () => {
+      const { renderLassoCrop } = await import("/trace-crop.mjs");
+      const path = [
+        { x: 0.2, y: 0.2 },
+        { x: 0.8, y: 0.2 },
+        { x: 0.8, y: 0.8 },
+        { x: 0.2, y: 0.8 },
+      ];
+      const pdfCanvas = document.querySelector("canvas.page-canvas");
+      const pdfCrop = await renderLassoCrop({
+        sourceCanvas: pdfCanvas,
+        normalizedPath: path,
+        padding: 24,
+        maxPixels: 4_000_000,
+      });
+
+      const largeCanvas = document.createElement("canvas");
+      largeCanvas.width = 3000;
+      largeCanvas.height = 4000;
+      const context = largeCanvas.getContext("2d", { alpha: false });
+      const gradient = context.createLinearGradient(0, 0, 3000, 4000);
+      gradient.addColorStop(0, "#f5efe6");
+      gradient.addColorStop(1, "#24362d");
+      context.fillStyle = gradient;
+      context.fillRect(0, 0, largeCanvas.width, largeCanvas.height);
+      const largeRuns = [];
+      let largeCrop = null;
+      for (let index = 0; index < 5; index += 1) {
+        largeCrop = await renderLassoCrop({
+          sourceCanvas: largeCanvas,
+          normalizedPath: path,
+          padding: 40,
+          maxPixels: 4_000_000,
+        });
+        largeRuns.push(largeCrop.durationMs);
+      }
+      largeCanvas.width = 1;
+      largeCanvas.height = 1;
+
+      if (pdfCrop.byteLength <= 0 || largeCrop.byteLength <= 0) {
+        throw new Error("Crop probe produced an empty Blob.");
+      }
+      const durations = largeRuns.slice().sort((left, right) => left - right);
+      const rounded = (value) => Math.round(value * 100) / 100;
+      return {
+        pdf: {
+          source: [pdfCanvas.width, pdfCanvas.height],
+          output: [pdfCrop.width, pdfCrop.height],
+          bytes: pdfCrop.byteLength,
+          durationMs: Math.round(pdfCrop.durationMs * 100) / 100,
+        },
+        large: {
+          source: [3000, 4000],
+          output: [largeCrop.width, largeCrop.height],
+          outputPixels: largeCrop.plan.outputPixels,
+          estimatedPeakPixelBytes: 3000 * 4000 * 4 + largeCrop.plan.outputPixels * 4,
+          bytes: largeCrop.byteLength,
+          iterations: durations.length,
+          p50DurationMs: rounded(durations[Math.floor((durations.length - 1) * 0.5)]),
+          p95DurationMs: rounded(durations[Math.floor((durations.length - 1) * 0.95)]),
+          maximumDurationMs: rounded(durations.at(-1)),
+        },
+      };
+    })()`, true);
 
     const productWindow = createWindow(productPreload);
     windows.push(productWindow);
@@ -302,7 +370,7 @@ async function run() {
         return response.value;
       };
       const capabilities = await call("capabilities");
-      const document = await call("registerDocument", {
+      const registeredDocument = await call("registerDocument", {
         id: "doc-integration",
         fingerprint: "sha256:integration-document",
         displayName: "integration-smoke.pdf",
@@ -310,8 +378,8 @@ async function run() {
       });
       const created = await call("createDraft", {
         id: "trace-integration",
-        documentId: document.id,
-        documentFingerprint: document.fingerprint,
+        documentId: registeredDocument.id,
+        documentFingerprint: registeredDocument.fingerprint,
         pageIndex: 0,
         lassoPath: [
           { x: 0.1, y: 0.1 },
@@ -323,19 +391,42 @@ async function run() {
         speedTier: "long-day",
         speedPxPerSecond: 20,
       });
-      const listed = await call("listTraces", document.id);
-      const transitioned = await call(
-        "transitionTrace",
-        document.id,
+      const { renderLassoCrop } = await import("/trace-crop.mjs");
+      const cropCanvas = document.createElement("canvas");
+      cropCanvas.width = 64;
+      cropCanvas.height = 64;
+      const cropContext = cropCanvas.getContext("2d", { alpha: false });
+      cropContext.fillStyle = "#527562";
+      cropContext.fillRect(0, 0, 64, 64);
+      const crop = await renderLassoCrop({
+        sourceCanvas: cropCanvas,
+        normalizedPath: [
+          { x: 0, y: 0 },
+          { x: 1, y: 0 },
+          { x: 1, y: 1 },
+          { x: 0, y: 1 },
+        ],
+        padding: 0,
+      });
+      const cropBytes = new Uint8Array(await crop.blob.arrayBuffer());
+      const savedCrop = await call(
+        "saveCrop",
+        registeredDocument.id,
         created.id,
-        { type: "CROP_FAILED", errorCode: "INTEGRATION_PROBE" },
-        { expectedRevision: created.revision },
+        cropBytes,
+        {
+          mimeType: crop.mimeType,
+          width: crop.width,
+          height: crop.height,
+          expectedRevision: created.revision,
+        },
       );
+      const listed = await call("listTraces", registeredDocument.id);
       let conflictCode = null;
       try {
         await call(
           "transitionTrace",
-          document.id,
+          registeredDocument.id,
           created.id,
           { type: "RETRY_CROP" },
           { expectedRevision: created.revision },
@@ -348,12 +439,13 @@ async function run() {
       }
       return {
         capabilities,
-        documentId: document.id,
+        documentId: registeredDocument.id,
         traceId: created.id,
         readingOrder: created.readingContext.readingOrder,
         listedCount: listed.length,
-        cropState: transitioned.crop.state,
-        revision: transitioned.revision,
+        cropState: savedCrop.crop.state,
+        cropBytes: crop.byteLength,
+        revision: savedCrop.revision,
         conflictCode,
         pathForFileType: typeof api.pathForFile,
       };
@@ -364,6 +456,7 @@ async function run() {
       security: { contextIsolation: true, nodeIntegration: false, sandbox: true },
       ipc,
       traceBridge,
+      cropProbe,
       shelf,
       restartPersistence,
       reader,

@@ -180,3 +180,15 @@ Provider 支持视觉时发送图文，不支持时自动使用文字并记录 `
 ### D43：readingOrder 可以有空洞，不能重复
 
 Repository 以持久计数器和已有最大序号的较大者分配，并先推进计数器再写 trace；崩溃最多留下空洞，不会重复。
+
+### D44：v5.0 内部裁图使用 PNG 与 4M 输出像素预算
+
+本机高 DPR PoC 证明 4M 像素足以保持局部清晰并约束内存；repository 只接受有 PNG 签名、尺寸明确且不超过 64MB 的 crop。
+
+### D45：保存矩形上下文原图，套索遮罩是派生表现
+
+裁图事实源保留带 padding 的矩形区域与原始归一化路径；不规则透明图和路径外淡出可以重新生成，不覆盖原图。
+
+### D46：裁图二进制写入服从 trace revision
+
+saveCrop 在同文档锁内检查 expectedRevision，原子写入 crop.png 后更新 CROP_READY；迟到结果不能覆盖更新后的 trace。

@@ -41,6 +41,8 @@
       "reading-trace.mjs",
       "trace-session.mjs",
       "trace-client.mjs",
+      "lasso-geometry.mjs",
+      "trace-crop.mjs",
       "index.html",
       "styles.css",
       "http-range.mjs",

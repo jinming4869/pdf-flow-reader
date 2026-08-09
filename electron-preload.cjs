@@ -6,6 +6,7 @@ const channels = Object.freeze({
   createDraft: "night-study:trace-create-draft",
   readTrace: "night-study:trace-read",
   listTraces: "night-study:trace-list",
+  saveCrop: "night-study:trace-save-crop",
   transitionTrace: "night-study:trace-transition",
 });
 
@@ -30,6 +31,22 @@ contextBridge.exposeInMainWorld("nightStudyTrace", Object.freeze({
   },
   listTraces(documentId, { includeTrashed = false } = {}) {
     return invoke(channels.listTraces, { documentId, includeTrashed });
+  },
+  saveCrop(documentId, traceId, bytes, {
+    mimeType,
+    width,
+    height,
+    expectedRevision,
+  } = {}) {
+    return invoke(channels.saveCrop, {
+      documentId,
+      traceId,
+      bytes,
+      mimeType,
+      width,
+      height,
+      expectedRevision,
+    });
   },
   transitionTrace(documentId, traceId, event, { expectedRevision } = {}) {
     return invoke(channels.transitionTrace, {

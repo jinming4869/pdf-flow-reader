@@ -6,6 +6,7 @@ export const TRACE_IPC_CHANNELS = Object.freeze({
   createDraft: "night-study:trace-create-draft",
   readTrace: "night-study:trace-read",
   listTraces: "night-study:trace-list",
+  saveCrop: "night-study:trace-save-crop",
   transitionTrace: "night-study:trace-transition",
 });
 
@@ -62,6 +63,20 @@ export function registerTraceIpc({ ipcMain, repository } = {}) {
       return repository.listTraces(input.documentId, {
         includeTrashed: input.includeTrashed === true,
       });
+    }],
+    [TRACE_IPC_CHANNELS.saveCrop, async (_event, payload) => {
+      const input = payloadObject(payload);
+      return repository.saveCrop(
+        input.documentId,
+        input.traceId,
+        input.bytes,
+        {
+          mimeType: input.mimeType,
+          width: input.width,
+          height: input.height,
+        },
+        { expectedRevision: input.expectedRevision },
+      );
     }],
     [TRACE_IPC_CHANNELS.transitionTrace, async (_event, payload) => {
       const input = payloadObject(payload);

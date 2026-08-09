@@ -192,3 +192,15 @@ Repository 以持久计数器和已有最大序号的较大者分配，并先推
 ### D46：裁图二进制写入服从 trace revision
 
 saveCrop 在同文档锁内检查 expectedRevision，原子写入 crop.png 后更新 CROP_READY；迟到结果不能覆盖更新后的 trace。
+
+### D47：正式套索交互由独立 controller 编排
+
+app.mjs 只提供暂停、TTS 取消、页面 chunks/canvas、速度上下文和返回回调；状态机、pointer、墨线、几何、crop 与持久化都留在 `trace-capture-controller.mjs`。
+
+### D48：正式 UI 只接受 PDF.js 内容 fingerprint
+
+旧文件元数据指纹继续服务最近阅读，但不能锚定航迹。PDF.js fingerprint 缺失时关闭航迹入口，不静默降级。
+
+### D49：取消套索退出一次性模式并保持暂停
+
+L、Esc、右键、过短路径或跨页路径不创建 trace；解除视口冻结后播放状态仍为暂停，符合冻结需求 D29。

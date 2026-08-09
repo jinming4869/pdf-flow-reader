@@ -23,6 +23,16 @@
       </div>
       <div class="topbar-actions">
         <button
+          id="traceLassoButton"
+          class="trace-lasso-button"
+          type="button"
+          aria-pressed="false"
+          aria-describedby="traceStatus"
+          title="L：圈住被书触动的一瞬"
+          hidden
+        ><span aria-hidden="true">⌁</span><span>航迹</span></button>
+        <span id="traceStatus" class="trace-status" role="status" aria-live="polite" hidden></span>
+        <button
           id="ttsPointReadButton"
           class="point-read-button"
           type="button"
@@ -160,6 +170,19 @@
 
       <div id="pageStatus" class="page-status" aria-live="polite">准备中</div>
     </section>
+
+    <aside id="tracePanel" class="trace-panel" aria-label="航迹草稿" hidden>
+      <div class="trace-panel-heading">
+        <div>
+          <span class="trace-panel-kicker">READING TRACE</span>
+          <strong>这一刻已先留在本机</strong>
+        </div>
+        <button id="traceReturnButton" type="button">回到书流</button>
+      </div>
+      <img id="tracePreview" class="trace-preview" alt="" hidden />
+      <p id="traceSummary" class="trace-summary">正在保存路径与文字…</p>
+      <p class="trace-emotion-placeholder">情绪坐标待落点；即使暂时不填，痕迹也不会丢失。</p>
+    </aside>
 
     <aside id="ocrDock" class="ocr-dock" aria-label="OCR 扫描增强" hidden>
       <button id="ocrButton" type="button" aria-describedby="ocrHelp" disabled>

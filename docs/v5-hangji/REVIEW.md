@@ -120,3 +120,20 @@
 - Node 完整回归 339 / 339，Electron smoke 通过。
 
 真实扫描书、复杂双栏和大型私人 PDF 仍需在阶段 6 与阶段 10 继续验收。详细记录见 [`stage-5-lasso-crop-poc/README.md`](./stage-5-lasso-crop-poc/README.md)。
+
+## 2026-08-09：阶段 6 正式草稿留痕复核
+
+结论：丝带环、L / Esc、墨线、自动暂停、TTS 取消、视口冻结、draft、PNG 和最小保存面板已经在正式 app.mjs 路径完成；情绪和正式回流尚未接入，因此仍不是可发布 v5.0。
+
+关键证据：
+
+- 正式 UI 只在桌面 repository 可用且 PDF.js fingerprint 注册成功时出现；
+- 未武装时现有文字选择和点句事件不被拦截；
+- 真实 PointerEvent 套索产生一条 crop ready 的本地 trace；
+- 保存期间按钮、冻结状态、面板和预览均与状态机一致；
+- 返回后面板隐藏、视口解冻；
+- L → Esc 前后 trace 数量不变且播放保持暂停；
+- app.mjs 不包含套索或裁图算法；
+- Node 完整回归 342 / 342，Electron UI smoke 通过。
+
+详细记录见 [`stage-6-draft-capture/README.md`](./stage-6-draft-capture/README.md)。

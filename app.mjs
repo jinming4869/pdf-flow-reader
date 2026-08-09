@@ -5,6 +5,8 @@ import {
   moveCarouselIndex,
   paletteForBook,
 } from "./book-carousel.mjs";
+import { createTraceCaptureController } from "./trace-capture-controller.mjs";
+import { createTraceClient } from "./trace-client.mjs";
 import { createLocalOcrProvider } from "./ocr-provider.mjs";
 import {
   continuousOcrAheadPage,
@@ -84,6 +86,7 @@ import { createPointReadSession } from "./tts-point-session.mjs";
 import {
   clearLocalState,
   createDocumentFingerprint,
+  createDocumentId,
   latestRhythmEcho,
   readLocalState,
   recentDocumentRecords,
@@ -138,6 +141,12 @@ const elements = {
   englishRate: document.querySelector("#englishRate"),
   rhythmInsight: document.querySelector("#rhythmInsight"),
   densityHint: document.querySelector("#densityHint"),
+  traceLassoButton: document.querySelector("#traceLassoButton"),
+  traceStatus: document.querySelector("#traceStatus"),
+  tracePanel: document.querySelector("#tracePanel"),
+  tracePreview: document.querySelector("#tracePreview"),
+  traceSummary: document.querySelector("#traceSummary"),
+  traceReturnButton: document.querySelector("#traceReturnButton"),
   ttsPointReadButton: document.querySelector("#ttsPointReadButton"),
   ttsPointReadStatus: document.querySelector("#ttsPointReadStatus"),
   topReadingTime: document.querySelector("#topReadingTime"),
@@ -235,6 +244,7 @@ let diagnosticsSession = {
 };
 let activeDocumentRecord = null;
 let activeFileMeta = null;
+let activeTraceDocument = null;
 let pendingResumeRecord = null;
 let homeBookItems = [];
 let homeBookIndex = 0;
@@ -252,6 +262,7 @@ let activeTtsTierKey = speedTier(speed).themeKey;
 const pointReadSession = createPointReadSession();
 let pointReadScrollHold = false;
 let pointReadGesture = null;
+const traceClient = createTraceClient();
 
 const speedCueEngine = createSpeedCueEngine({
   getVolume: () => localState.preferences.soundCueVolume,
@@ -338,6 +349,45 @@ const ocrTaskScheduler = createOcrTaskScheduler({
         priorityPage,
       ));
     return ocrRunChain;
+  },
+});
+
+const traceCapture = createTraceCaptureController({
+  elements: {
+    button: elements.traceLassoButton,
+    status: elements.traceStatus,
+    panel: elements.tracePanel,
+    preview: elements.tracePreview,
+    summary: elements.traceSummary,
+    returnButton: elements.traceReturnButton,
+    pages: elements.pages,
+    viewport: elements.viewport,
+  },
+  traceClient,
+  getPageChunks: (pageNumber) => readableChunksForPage(pageNumber),
+  getPageCanvas: (pageNumber, shell) => (
+    shell?.querySelector("canvas.page-canvas") ??
+    pageShells[pageNumber - 1]?.querySelector("canvas.page-canvas") ??
+    null
+  ),
+  getSpeedContext: () => ({
+    speedTier: speedTier(speed).themeKey,
+    speedPxPerSecond: speed,
+  }),
+  onPause: () => {
+    setPlaying(false, { cancelSpeech: false });
+    easedSpeed = 0;
+    scrollCarry = 0;
+  },
+  onCancelSpeech: () => {
+    cancelSpeechSession("lasso-armed", {
+      pausePointScroll: false,
+      fade: true,
+    });
+  },
+  onReturnToFlow: () => {
+    // Stage 8 replaces this current-speed resume with the frozen 30/90s curve.
+    setPlaying(true);
   },
 });
 
@@ -1589,7 +1639,42 @@ function createFileMetaFromFile(file) {
     fileName: file.name,
     fileSize: file.size,
     lastModified: file.lastModified ?? 0,
+    desktopPath: traceClient.pathForFile(file),
   };
+}
+
+async function registerTraceDocument(pdf, displayName) {
+  activeTraceDocument = null;
+  if (!traceClient.available) {
+    traceCapture.setDocument(null);
+    return null;
+  }
+  const rawFingerprint = Array.isArray(pdf?.fingerprints)
+    ? pdf.fingerprints.find((value) => typeof value === "string" && value.trim())
+    : null;
+  if (!rawFingerprint) {
+    traceCapture.setDocument(null, {
+      unavailableReason: "这份 PDF 缺少稳定内容身份，暂不开放航迹",
+    });
+    return null;
+  }
+  const fingerprint = `pdfjs:${rawFingerprint.trim()}`;
+  try {
+    activeTraceDocument = await traceClient.registerDocument({
+      id: createDocumentId(fingerprint),
+      fingerprint,
+      displayName,
+      lastKnownPath: activeFileMeta?.desktopPath ?? null,
+      fileSize: activeFileMeta?.fileSize ?? null,
+    });
+    traceCapture.setDocument(activeTraceDocument);
+    return activeTraceDocument;
+  } catch (error) {
+    traceCapture.setDocument(null, {
+      unavailableReason: `航迹本地仓库暂不可用：${error.code ?? "TRACE_UNAVAILABLE"}`,
+    });
+    return null;
+  }
 }
 
 function activateDocumentRecord(fileMeta) {
@@ -2309,6 +2394,7 @@ function handleReadingPageChange(pageNumber) {
 }
 
 function setPlaying(next, { cancelSpeech = true } = {}) {
+  if (next && traceCapture.snapshot().scrollHold) return;
   playing = next;
   if (!playing && cancelSpeech) {
     cancelSpeechSession("paused");
@@ -2327,6 +2413,8 @@ function clearFirstPageMessageTimer() {
 
 function showError(error) {
   clearFirstPageMessageTimer();
+  activeTraceDocument = null;
+  traceCapture.setDocument(null);
   readyToMove = false;
   setPlaying(false);
   elements.toggle.disabled = true;
@@ -2340,6 +2428,8 @@ function showError(error) {
 function showEmptyState() {
   clearFirstPageMessageTimer();
   clearTextSession();
+  activeTraceDocument = null;
+  traceCapture.setDocument(null);
   readyToMove = false;
   activeDocumentRecord = null;
   activeFileMeta = null;
@@ -2621,6 +2711,8 @@ async function openPdf(sourceOrFactory, displayName, { fileMeta = null } = {}) {
   pendingSourceAbortController = sourceController;
   clearFirstPageMessageTimer();
   clearTextSession();
+  activeTraceDocument = null;
+  traceCapture.reset("document-changing");
   diagnosticsSession = {
     startedAt: performance.now(),
     metadataReadyMs: null,
@@ -2733,6 +2825,7 @@ async function openPdf(sourceOrFactory, displayName, { fileMeta = null } = {}) {
 
   activePdf = pdf;
   pageCount = pdf.numPages;
+  await registerTraceDocument(pdf, displayName);
   diagnosticsSession.metadataReadyMs = Math.round(
     performance.now() - diagnosticsSession.startedAt,
   );
@@ -2965,7 +3058,13 @@ function animate(timestamp) {
   const elapsed = Math.min(64, timestamp - lastFrame);
   lastFrame = timestamp;
 
-  const desiredSpeed = readyToMove && playing && !pointReadScrollHold && !document.hidden ? speed : 0;
+  const desiredSpeed = (
+    readyToMove &&
+    playing &&
+    !pointReadScrollHold &&
+    !traceCapture.snapshot().scrollHold &&
+    !document.hidden
+  ) ? speed : 0;
   const easing = 1 - Math.exp(-elapsed / 420);
   easedSpeed += (desiredSpeed - easedSpeed) * easing;
 
@@ -3662,7 +3761,11 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     const pointInterrupted = interruptPointReadForUser("document-hidden");
     wasPlayingBeforeHidden = pointInterrupted ? false : playing;
-  } else if (wasPlayingBeforeHidden && readyToMove) {
+  } else if (
+    wasPlayingBeforeHidden &&
+    readyToMove &&
+    !traceCapture.snapshot().scrollHold
+  ) {
     setPlaying(true);
   }
 });

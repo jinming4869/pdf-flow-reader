@@ -451,16 +451,123 @@ async function run() {
       };
     })()`, true);
 
+    await loadUrl(productWindow, readerUrl, "product trace capture UI");
+    await waitFor(
+      productWindow,
+      `!document.querySelector("#traceLassoButton").hidden && document.querySelector("canvas.page-canvas")`,
+    );
+    await productWindow.webContents.executeJavaScript(`(() => {
+      const button = document.querySelector("#traceLassoButton");
+      const canvas = document.querySelector("canvas.page-canvas");
+      const rectangle = canvas.getBoundingClientRect();
+      const fire = (type, x, y, buttons) => canvas.dispatchEvent(new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 77,
+        pointerType: "mouse",
+        button: 0,
+        buttons,
+        clientX: rectangle.left + rectangle.width * x,
+        clientY: rectangle.top + rectangle.height * y,
+      }));
+      button.click();
+      fire("pointerdown", 0.2, 0.2, 1);
+      fire("pointermove", 0.8, 0.2, 1);
+      fire("pointermove", 0.8, 0.8, 1);
+      fire("pointermove", 0.2, 0.8, 1);
+      fire("pointerup", 0.2, 0.2, 0);
+      return true;
+    })()`, true);
+    await waitFor(
+      productWindow,
+      `document.querySelector("#tracePanel")?.dataset.state === "saved" && !document.querySelector("#tracePreview").hidden`,
+      15_000,
+    );
+    const uiTraceCapture = await productWindow.webContents.executeJavaScript(`(async () => {
+      const panel = document.querySelector("#tracePanel");
+      const response = await window.nightStudyTrace.listTraces(panel.dataset.documentId);
+      if (!response?.ok) throw new Error(response?.error?.message || "Unable to list UI traces.");
+      const trace = response.value.find((entry) => entry.id === panel.dataset.traceId);
+      return {
+        traceId: panel.dataset.traceId,
+        documentId: panel.dataset.documentId,
+        traceCount: response.value.length,
+        cropState: trace?.crop?.state || null,
+        sourceProvenance: trace?.source?.provenance || null,
+        panelState: panel.dataset.state,
+        previewVisible: !document.querySelector("#tracePreview").hidden,
+        buttonPressed: document.querySelector("#traceLassoButton").getAttribute("aria-pressed"),
+        viewportFrozen: document.querySelector("#viewport").classList.contains("is-trace-frozen"),
+        summary: document.querySelector("#traceSummary").textContent,
+      };
+    })()`, true);
+    const traceCaptureScreenshot = await capture(productWindow, "electron-trace-saved.png");
+    await productWindow.webContents.executeJavaScript(
+      `document.querySelector("#traceReturnButton").click()`,
+      true,
+    );
+    await waitFor(
+      productWindow,
+      `document.querySelector("#tracePanel").hidden && !document.querySelector("#viewport").classList.contains("is-trace-frozen")`,
+    );
+    uiTraceCapture.afterReturn = await productWindow.webContents.executeJavaScript(`(() => ({
+      panelHidden: document.querySelector("#tracePanel").hidden,
+      viewportFrozen: document.querySelector("#viewport").classList.contains("is-trace-frozen"),
+      buttonPressed: document.querySelector("#traceLassoButton").getAttribute("aria-pressed"),
+    }))()`, true);
+    uiTraceCapture.cancelProbe = await productWindow.webContents.executeJavaScript(`(async () => {
+      const panel = document.querySelector("#tracePanel");
+      const list = async () => {
+        const response = await window.nightStudyTrace.listTraces(panel.dataset.documentId);
+        if (!response?.ok) throw new Error(response?.error?.message || "Unable to list traces.");
+        return response.value;
+      };
+      const before = await list();
+      window.dispatchEvent(new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        code: "KeyL",
+        key: "l",
+      }));
+      const armed = {
+        buttonPressed: document.querySelector("#traceLassoButton").getAttribute("aria-pressed"),
+        viewportFrozen: document.querySelector("#viewport").classList.contains("is-trace-frozen"),
+      };
+      window.dispatchEvent(new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        code: "Escape",
+        key: "Escape",
+      }));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const after = await list();
+      return {
+        traceCountBefore: before.length,
+        traceCountAfter: after.length,
+        armed,
+        afterCancel: {
+          buttonPressed: document.querySelector("#traceLassoButton").getAttribute("aria-pressed"),
+          viewportFrozen: document.querySelector("#viewport").classList.contains("is-trace-frozen"),
+          panelHidden: document.querySelector("#tracePanel").hidden,
+          playbackLabel: document.querySelector("#toggleText").textContent,
+        },
+      };
+    })()`, true);
+    if (uiTraceCapture.cancelProbe.traceCountAfter !== uiTraceCapture.cancelProbe.traceCountBefore) {
+      throw new Error("Cancelling a lasso unexpectedly created a trace.");
+    }
+
     return {
       ok: true,
       security: { contextIsolation: true, nodeIntegration: false, sandbox: true },
       ipc,
       traceBridge,
+      uiTraceCapture,
       cropProbe,
       shelf,
       restartPersistence,
       reader,
-      captures: [shelfCapture, readerCapture].filter(Boolean),
+      captures: [shelfCapture, readerCapture, traceCaptureScreenshot].filter(Boolean),
     };
   } finally {
     for (const window of windows) {

@@ -37,6 +37,7 @@ test("local reader server exposes trace contracts as JavaScript modules", async 
     "reading-trace.mjs",
     "trace-session.mjs",
     "trace-client.mjs",
+    "trace-capture-controller.mjs",
     "lasso-geometry.mjs",
     "trace-crop.mjs",
   ]) {

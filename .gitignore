@@ -2,7 +2,7 @@
 *.zip
 .DS_Store
 Thumbs.db
-node_modules/
+node_modules
 dist/
 build/runtime/
 build/tts-multilingual-pyinstaller/

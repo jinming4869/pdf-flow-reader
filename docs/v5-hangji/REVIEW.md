@@ -53,3 +53,19 @@
 - 私人 PDF、用户内容、情绪、密钥和路径不得进入 Git、云端遥测或未授权 AI 请求。
 
 仍需 PoC 决定的内容只包括算法、画质、时延、内存、曲线与外部 API 参数；这些参数不得静默改变冻结产品行为。完整契约见 [`REQUIREMENTS.md`](./REQUIREMENTS.md)，线性执行见 [`WORKFLOW.md`](./WORKFLOW.md)。
+
+## 2026-08-09：阶段 2 集成测试基础复核
+
+结论：在不接触私人 PDF、不修改正式 Electron 主进程、不把测试 preload 打入生产包的前提下，已经具备可重复的本机 Electron 集成 smoke，可以进入状态机与模块边界阶段。
+
+证据：
+
+- 新增独立 `test:electron:smoke`；
+- 保持 context isolation、sandbox 与关闭 node integration；
+- 覆盖书架键盘、PointerEvent、隔离 IPC、窗口重建后的 localStorage、合成 PDF 和页面 canvas；
+- Node 完整回归 297 / 297；
+- Electron smoke 正常退出并可选生成截图；
+- 测试脚本明确排除在正式包之外；
+- 临时 userData、PDF 和服务器随测试生命周期清理。
+
+详细记录见 [`stage-2-integration-tests/README.md`](./stage-2-integration-tests/README.md)。

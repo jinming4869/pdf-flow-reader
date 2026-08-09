@@ -24,13 +24,14 @@ test("trace contracts are included in the desktop package", () => {
   ));
   assert.ok(packageJson.build.files.includes("reading-trace.mjs"));
   assert.ok(packageJson.build.files.includes("trace-session.mjs"));
+  assert.ok(packageJson.build.files.includes("trace-client.mjs"));
 });
 
 test("local reader server exposes trace contracts as JavaScript modules", async (t) => {
   const { server, origin } = await startServer();
   t.after(() => new Promise((resolve) => server.close(resolve)));
 
-  for (const filename of ["reading-trace.mjs", "trace-session.mjs"]) {
+  for (const filename of ["reading-trace.mjs", "trace-session.mjs", "trace-client.mjs"]) {
     const response = await fetch(`${origin}/${filename}`, {
       method: "HEAD",
       headers: { Connection: "close" },

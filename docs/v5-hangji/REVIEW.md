@@ -87,3 +87,20 @@
 - 新模块已经进入桌面包和本地静态服务，但尚未被 app.mjs 调用。
 
 详细记录见 [`stage-3-trace-state/README.md`](./stage-3-trace-state/README.md)。
+
+## 2026-08-09：阶段 4 本地事实源复核
+
+结论：可检查文件目录、原子写入、损坏恢复、乐观并发、回收站、正式 preload 与来源受限 IPC 已形成完整本地事实源；app.mjs 尚未使用，因此现有阅读行为保持不变。
+
+关键证据：
+
+- 同文档并发创建保持 readingOrder 单调且不重复；
+- 失败 Promise 不会毒化后续写队列；
+- 损坏的 trace 与 document 被隔离到 recovery；
+- trashed 记录可恢复，只有到期或明确确认后 purge；
+- preload 不暴露原始 ipcRenderer，repository 不经 HTTP 暴露；
+- 非本地 renderer 被拒绝；
+- plain error envelope 在真实 Electron 中保留 `TRACE_REVISION_CONFLICT`；
+- Node 完整回归 326 / 326，Electron smoke 通过。
+
+详细记录见 [`stage-4-local-trace-store/README.md`](./stage-4-local-trace-store/README.md)。

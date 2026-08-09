@@ -10,7 +10,8 @@ const { dirname, join, resolve } = require("node:path");
 const { pathToFileURL } = require("node:url");
 
 const root = resolve(__dirname, "..");
-const preload = join(__dirname, "electron-integration-preload.cjs");
+const integrationPreload = join(__dirname, "electron-integration-preload.cjs");
+const productPreload = join(root, "electron-preload.cjs");
 const tempRoot = mkdtempSync(join(tmpdir(), "night-study-integration-"));
 const profileRoot = join(tempRoot, "electron-profile");
 const captureDirectory = process.env.ELECTRON_SMOKE_CAPTURE_DIR
@@ -87,7 +88,7 @@ function closeServer(server) {
   return new Promise((resolveClose) => server.close(resolveClose));
 }
 
-function createWindow() {
+function createWindow(preloadPath = integrationPreload) {
   return new BrowserWindow({
     width: 1180,
     height: 860,
@@ -97,7 +98,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      preload,
+      preload: preloadPath,
     },
   });
 }
@@ -207,12 +208,24 @@ async function run() {
   const pdfPath = join(tempRoot, "integration-smoke.pdf");
   createSyntheticPdf(pdfPath);
 
-  const { createReaderServer } = await import(pathToFileURL(join(root, "server.mjs")).href);
+  const [
+    { createReaderServer },
+    { createTraceRepository },
+    { registerTraceIpc },
+  ] = await Promise.all([
+    import(pathToFileURL(join(root, "server.mjs")).href),
+    import(pathToFileURL(join(root, "trace-repository.mjs")).href),
+    import(pathToFileURL(join(root, "trace-ipc.mjs")).href),
+  ]);
   const shelfServer = createReaderServer({ appRoot: root });
   const readerServer = createReaderServer({ appRoot: root, pdfPath });
+  const traceRepository = createTraceRepository({ rootPath: join(tempRoot, "trace-store") });
+  await traceRepository.initialize();
+  await traceRepository.recover();
   const windows = [];
 
   ipcMain.handle("night-study:integration-ping", () => ({ ok: true, channel: "isolated-preload" }));
+  const disposeTraceIpc = registerTraceIpc({ ipcMain, repository: traceRepository });
 
   try {
     const [shelfUrl, readerUrl] = await Promise.all([
@@ -273,10 +286,84 @@ async function run() {
     }))()`, true);
     const readerCapture = await capture(restartedWindow, "electron-reader.png");
 
+    const productWindow = createWindow(productPreload);
+    windows.push(productWindow);
+    await loadUrl(productWindow, shelfUrl, "product trace preload");
+    await waitFor(productWindow, `typeof window.nightStudyTrace === "object"`);
+    const traceBridge = await productWindow.webContents.executeJavaScript(`(async () => {
+      const api = window.nightStudyTrace;
+      const call = async (method, ...args) => {
+        const response = await api[method](...args);
+        if (!response?.ok) {
+          const error = new Error(response?.error?.message || "Trace operation failed.");
+          error.code = response?.error?.code || "TRACE_IPC_FAILED";
+          throw error;
+        }
+        return response.value;
+      };
+      const capabilities = await call("capabilities");
+      const document = await call("registerDocument", {
+        id: "doc-integration",
+        fingerprint: "sha256:integration-document",
+        displayName: "integration-smoke.pdf",
+        fileSize: 1024,
+      });
+      const created = await call("createDraft", {
+        id: "trace-integration",
+        documentId: document.id,
+        documentFingerprint: document.fingerprint,
+        pageIndex: 0,
+        lassoPath: [
+          { x: 0.1, y: 0.1 },
+          { x: 0.8, y: 0.1 },
+          { x: 0.4, y: 0.8 },
+        ],
+        sourceText: "Synthetic trace text.",
+        sourceProvenance: "native",
+        speedTier: "long-day",
+        speedPxPerSecond: 20,
+      });
+      const listed = await call("listTraces", document.id);
+      const transitioned = await call(
+        "transitionTrace",
+        document.id,
+        created.id,
+        { type: "CROP_FAILED", errorCode: "INTEGRATION_PROBE" },
+        { expectedRevision: created.revision },
+      );
+      let conflictCode = null;
+      try {
+        await call(
+          "transitionTrace",
+          document.id,
+          created.id,
+          { type: "RETRY_CROP" },
+          { expectedRevision: created.revision },
+        );
+      } catch (error) {
+        conflictCode = error.code || null;
+      }
+      if (conflictCode !== "TRACE_REVISION_CONFLICT") {
+        throw new Error("Trace IPC lost its public error code: " + conflictCode);
+      }
+      return {
+        capabilities,
+        documentId: document.id,
+        traceId: created.id,
+        readingOrder: created.readingContext.readingOrder,
+        listedCount: listed.length,
+        cropState: transitioned.crop.state,
+        revision: transitioned.revision,
+        conflictCode,
+        pathForFileType: typeof api.pathForFile,
+      };
+    })()`, true);
+
     return {
       ok: true,
       security: { contextIsolation: true, nodeIntegration: false, sandbox: true },
       ipc,
+      traceBridge,
       shelf,
       restartPersistence,
       reader,
@@ -286,6 +373,7 @@ async function run() {
     for (const window of windows) {
       if (!window.isDestroyed()) window.destroy();
     }
+    disposeTraceIpc();
     ipcMain.removeHandler("night-study:integration-ping");
     await Promise.all([closeServer(shelfServer), closeServer(readerServer)]);
   }

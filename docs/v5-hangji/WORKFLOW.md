@@ -1,6 +1,6 @@
 # v5「航迹」线性实施工作流
 
-状态：**阶段 3 已完成；下一步为阶段 4 本地事实源**
+状态：**阶段 4 已完成；下一步为阶段 5 套索与裁图 PoC**
 
 当前优先级：先做到产品所有者本机 macOS 稳定运行，再处理 Windows 与 GitHub 公开发布适配。
 
@@ -70,7 +70,10 @@
 - [x] 建立 ReadingTrace 严格契约、序列化边界和生命周期
 - [x] 建立一次性套索会话状态机与 generation 失效语义
 - [x] 完整 Node 回归 311 / 311，Electron smoke 通过
-- [ ] 建立 Electron 正式文件桥接与本地 trace repository
+- [x] 建立原子 trace repository、恢复、并发序号与 30 天回收站
+- [x] 建立正式 preload、来源受限 IPC 与 renderer trace client
+- [x] Node 完整回归 326 / 326，Electron product bridge smoke 通过
+- [ ] 验证套索几何、区域文字命中与高 DPR 裁图
 
 ## 5. 阶段报告模板
 

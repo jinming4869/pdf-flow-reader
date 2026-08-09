@@ -168,3 +168,15 @@ Provider 支持视觉时发送图文，不支持时自动使用文字并记录 `
 ### D40：readingOrder 是不可重编号的插入序号
 
 删除中间痕迹后允许出现空洞；书架可以按 capturedAt 和 readingOrder 稳定排序，不能为视觉连续而重写已存在的引用。
+
+### D41：Trace IPC 只接受本地 reader renderer
+
+正式主进程拒绝非 `127.0.0.1` reader 来源；repository 不通过本地 HTTP 暴露，preload 也不暴露原始 ipcRenderer。
+
+### D42：业务错误通过显式信封跨 contextBridge
+
+主进程只返回稳定 code 与 message；preload 透传 plain object，renderer client 在主世界重建 Error，避免 Electron 丢失自定义 Error 属性。
+
+### D43：readingOrder 可以有空洞，不能重复
+
+Repository 以持久计数器和已有最大序号的较大者分配，并先推进计数器再写 trace；崩溃最多留下空洞，不会重复。

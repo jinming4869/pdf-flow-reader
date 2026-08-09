@@ -1,9 +1,11 @@
-import { app, BrowserWindow, Menu, nativeImage, shell } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, shell } from "electron";
 import { existsSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createReaderServer } from "./server.mjs";
+import { registerTraceIpc } from "./trace-ipc.mjs";
+import { createTraceRepository } from "./trace-repository.mjs";
 
 const appRoot = dirname(fileURLToPath(import.meta.url));
 const applicationName = "夜晚的书斋";
@@ -14,6 +16,8 @@ let readerServer = null;
 let readerUrl = null;
 let activeIconMode = null;
 let iconTimer = null;
+let traceRepository = null;
+let disposeTraceIpc = null;
 let pendingPdfPath = findPdfArgument(process.argv.slice(1));
 
 process.on("unhandledRejection", (reason) => {
@@ -107,6 +111,32 @@ async function ensureReaderServer(pdfPath = pendingPdfPath) {
   return readerUrl;
 }
 
+async function initializeTraceInfrastructure() {
+  try {
+    traceRepository = createTraceRepository({
+      rootPath: join(app.getPath("userData"), "reading-traces"),
+    });
+    await traceRepository.initialize();
+    const recovery = await traceRepository.recover();
+    const purged = await traceRepository.purgeExpired();
+    disposeTraceIpc = registerTraceIpc({ ipcMain, repository: traceRepository });
+    if (recovery.removedTemps || recovery.quarantined.length || purged.length) {
+      console.info("航迹本地仓库已恢复：", {
+        removedTemps: recovery.removedTemps,
+        quarantined: recovery.quarantined.length,
+        purged: purged.length,
+      });
+    }
+    return true;
+  } catch (error) {
+    traceRepository = null;
+    disposeTraceIpc?.();
+    disposeTraceIpc = null;
+    console.error("航迹本地仓库暂不可用，基础阅读仍可继续：", error);
+    return false;
+  }
+}
+
 async function createMainWindow() {
   const url = await ensureReaderServer();
   const initialIcon = iconImageForMode(iconModeForDate());
@@ -124,6 +154,7 @@ async function createMainWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload: join(appRoot, "electron-preload.cjs"),
     },
   });
 
@@ -200,6 +231,7 @@ app.on("open-file", (event, filePath) => {
 app.whenReady().then(async () => {
   installApplicationMenu();
   startIconSchedule();
+  await initializeTraceInfrastructure();
   await createMainWindow();
 
   app.on("activate", async () => {
@@ -214,6 +246,9 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  disposeTraceIpc?.();
+  disposeTraceIpc = null;
+  traceRepository = null;
   if (iconTimer) {
     clearInterval(iconTimer);
     iconTimer = null;

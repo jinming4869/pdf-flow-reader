@@ -69,3 +69,21 @@
 - 临时 userData、PDF 和服务器随测试生命周期清理。
 
 详细记录见 [`stage-2-integration-tests/README.md`](./stage-2-integration-tests/README.md)。
+
+## 2026-08-09：阶段 3 状态边界复核
+
+结论：ReadingTrace 用户事实契约与一次性套索会话已经成为两个零 DOM、零磁盘、零网络依赖的纯模块；v4.1 UI 与阅读行为未改变，可以进入本地事实源阶段。
+
+关键证据：
+
+- draft / active / trashed / purged 生命周期和 crop / emotion 独立状态均有失败测试；
+- 裁图失败可重试，不删除 trace；
+- originalEmotion 不可被修正覆盖；
+- save-error 不能静默回流；
+- generation 阻止文档切换后的迟到保存结果；
+- 严格序列化往返与不支持 schema 失败；
+- Node 完整回归 311 / 311；
+- Electron integration smoke 通过；
+- 新模块已经进入桌面包和本地静态服务，但尚未被 app.mjs 调用。
+
+详细记录见 [`stage-3-trace-state/README.md`](./stage-3-trace-state/README.md)。

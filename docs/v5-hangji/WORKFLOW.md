@@ -1,6 +1,6 @@
 # v5「航迹」线性实施工作流
 
-状态：**阶段 2 已完成；下一步为阶段 3 显式状态边界**
+状态：**阶段 3 已完成；下一步为阶段 4 本地事实源**
 
 当前优先级：先做到产品所有者本机 macOS 稳定运行，再处理 Windows 与 GitHub 公开发布适配。
 
@@ -67,7 +67,10 @@
 - [x] 从 v4.1 基线建立 `feature/v5.0-hangji-core` 分支
 - [x] 建立 Electron 隔离 IPC、指针事件、窗口重建和 PDF 渲染 smoke
 - [x] 完整 Node 回归 297 / 297 通过
-- [ ] 建立航迹显式状态机和独立模块边界
+- [x] 建立 ReadingTrace 严格契约、序列化边界和生命周期
+- [x] 建立一次性套索会话状态机与 generation 失效语义
+- [x] 完整 Node 回归 311 / 311，Electron smoke 通过
+- [ ] 建立 Electron 正式文件桥接与本地 trace repository
 
 ## 5. 阶段报告模板
 

@@ -35,6 +35,8 @@
       "server.mjs",
       "app.mjs",
       "book-carousel.mjs",
+      "reading-trace.mjs",
+      "trace-session.mjs",
       "index.html",
       "styles.css",
       "http-range.mjs",

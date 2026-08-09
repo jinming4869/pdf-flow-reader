@@ -21,6 +21,10 @@
 
 [`v4-hisheng/README.md`](./v4-hisheng/README.md) 汇总 v4 的产品设计、实现说明、模型实验与发布记录。
 
+## v4.1 书架资料
+
+[`v4.1-bookshelf/README.md`](./v4.1-bookshelf/README.md) 记录书架轮播、开书动画、自动化测试和本机 Electron 验收证据。当前是本地基线，尚未公开发布。
+
 ## v5「航迹」资料
 
 [`v5-hangji/README.md`](./v5-hangji/README.md) 汇总已冻结的自由套索、情绪航迹、回流、AI 与归档边界，并链接冻结需求、线性工作流和风险登记册。当前处于本地实施阶段，不代表 v4.0.0 已交付这些能力。

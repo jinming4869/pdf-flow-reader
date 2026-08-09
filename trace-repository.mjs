@@ -324,6 +324,27 @@ export function createTraceRepository({ rootPath } = {}) {
     });
   }
 
+  async function readCrop(documentId, traceId) {
+    const id = safeId(documentId, "documentId");
+    const traceIdValue = safeId(traceId, "traceId");
+    const trace = await readTrace(id, traceIdValue);
+    if (!trace || trace.crop.state !== "ready") return null;
+    try {
+      const bytes = await readFile(join(traceDirectory(id, traceIdValue), "crop.png"));
+      return {
+        mimeType: trace.crop.mimeType,
+        width: trace.crop.width,
+        height: trace.crop.height,
+        bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+      };
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        throw repositoryError("TRACE_CROP_NOT_FOUND", `找不到 trace ${traceIdValue} 的 crop.png。`, RangeError);
+      }
+      throw error;
+    }
+  }
+
   async function saveCrop(documentId, traceId, value, metadata = {}, options = {}) {
     const id = safeId(documentId, "documentId");
     const trace = safeId(traceId, "traceId");
@@ -464,6 +485,7 @@ export function createTraceRepository({ rootPath } = {}) {
     createDraft,
     readTrace,
     listTraces,
+    readCrop,
     saveCrop,
     transitionTrace,
     purgeExpired,

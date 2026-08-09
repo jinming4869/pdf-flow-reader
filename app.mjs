@@ -5,6 +5,7 @@ import {
   moveCarouselIndex,
   paletteForBook,
 } from "./book-carousel.mjs";
+import { createTraceBookController } from "./trace-book-controller.mjs";
 import { createTraceCaptureController } from "./trace-capture-controller.mjs";
 import { createTraceClient } from "./trace-client.mjs";
 import { createLocalOcrProvider } from "./ocr-provider.mjs";
@@ -143,6 +144,7 @@ const elements = {
   rhythmInsight: document.querySelector("#rhythmInsight"),
   densityHint: document.querySelector("#densityHint"),
   traceLassoButton: document.querySelector("#traceLassoButton"),
+  traceBookButton: document.querySelector("#traceBookButton"),
   traceStatus: document.querySelector("#traceStatus"),
   tracePanel: document.querySelector("#tracePanel"),
   tracePreview: document.querySelector("#tracePreview"),
@@ -151,6 +153,19 @@ const elements = {
   emotionMarker: document.querySelector("#emotionMarker"),
   emotionWords: document.querySelector("#emotionWords"),
   traceReturnButton: document.querySelector("#traceReturnButton"),
+  bookTracePanel: document.querySelector("#bookTracePanel"),
+  bookTraceClose: document.querySelector("#bookTraceClose"),
+  bookTraceTitle: document.querySelector("#bookTraceTitle"),
+  bookTraceChart: document.querySelector("#bookTraceChart"),
+  bookTraceList: document.querySelector("#bookTraceList"),
+  bookTraceImage: document.querySelector("#bookTraceImage"),
+  bookTraceMeta: document.querySelector("#bookTraceMeta"),
+  bookTraceJump: document.querySelector("#bookTraceJump"),
+  bookTraceTrash: document.querySelector("#bookTraceTrash"),
+  bookTraceTrashView: document.querySelector("#bookTraceTrashView"),
+  bookEmotionPad: document.querySelector("#bookEmotionPad"),
+  bookEmotionMarker: document.querySelector("#bookEmotionMarker"),
+  bookEmotionWords: document.querySelector("#bookEmotionWords"),
   ttsPointReadButton: document.querySelector("#ttsPointReadButton"),
   ttsPointReadStatus: document.querySelector("#ttsPointReadStatus"),
   topReadingTime: document.querySelector("#topReadingTime"),
@@ -402,6 +417,28 @@ const traceCapture = createTraceCaptureController({
       interruptionMs,
     });
   },
+});
+
+const traceBook = createTraceBookController({
+  elements: {
+    openButton: elements.traceBookButton,
+    panel: elements.bookTracePanel,
+    closeButton: elements.bookTraceClose,
+    title: elements.bookTraceTitle,
+    chart: elements.bookTraceChart,
+    list: elements.bookTraceList,
+    image: elements.bookTraceImage,
+    meta: elements.bookTraceMeta,
+    jumpButton: elements.bookTraceJump,
+    trashButton: elements.bookTraceTrash,
+    trashViewButton: elements.bookTraceTrashView,
+    emotionPad: elements.bookEmotionPad,
+    emotionMarker: elements.bookEmotionMarker,
+    emotionWords: elements.bookEmotionWords,
+  },
+  traceClient,
+  onOpen: () => setPlaying(false),
+  onJump: jumpToTracePage,
 });
 
 function emptyRenderSnapshot() {
@@ -1656,10 +1693,35 @@ function createFileMetaFromFile(file) {
   };
 }
 
+function jumpToTracePage(trace) {
+  if (!trace || activeTraceDocument?.id !== trace.documentId) {
+    if (elements.traceStatus) {
+      elements.traceStatus.hidden = false;
+      elements.traceStatus.textContent = "请先重新选择这本 PDF，再回到原页";
+    }
+    elements.filePicker.click();
+    return false;
+  }
+  const shell = pageShells[trace.pageIndex];
+  if (!shell) return false;
+  setPlaying(false);
+  cancelReadingReflow("trace-jump");
+  elements.viewport.scrollTo({
+    top: Math.max(0, shell.offsetTop - 82),
+    behavior: reducedMotion.matches ? "auto" : "smooth",
+  });
+  if (elements.traceStatus) {
+    elements.traceStatus.hidden = false;
+    elements.traceStatus.textContent = `已回到第 ${trace.pageIndex + 1} 页`;
+  }
+  return true;
+}
+
 async function registerTraceDocument(pdf, displayName) {
   activeTraceDocument = null;
   if (!traceClient.available) {
     traceCapture.setDocument(null);
+    traceBook.setDocument(null);
     return null;
   }
   const rawFingerprint = Array.isArray(pdf?.fingerprints)
@@ -1669,6 +1731,7 @@ async function registerTraceDocument(pdf, displayName) {
     traceCapture.setDocument(null, {
       unavailableReason: "这份 PDF 缺少稳定内容身份，暂不开放航迹",
     });
+    traceBook.setDocument(null);
     return null;
   }
   const fingerprint = `pdfjs:${rawFingerprint.trim()}`;
@@ -1681,11 +1744,25 @@ async function registerTraceDocument(pdf, displayName) {
       fileSize: activeFileMeta?.fileSize ?? null,
     });
     traceCapture.setDocument(activeTraceDocument);
+    traceBook.setDocument(activeTraceDocument, displayName);
+    if (activeDocumentRecord && activeFileMeta) {
+      const nextState = upsertDocumentRecord(
+        localState,
+        { ...activeFileMeta, fingerprint: activeDocumentRecord.fingerprint },
+        {
+          traceDocumentId: activeTraceDocument.id,
+          traceFingerprint: activeTraceDocument.fingerprint,
+        },
+      );
+      saveLocalState(nextState);
+      activeDocumentRecord = localState.documents[activeDocumentRecord.id] ?? activeDocumentRecord;
+    }
     return activeTraceDocument;
   } catch (error) {
     traceCapture.setDocument(null, {
       unavailableReason: `航迹本地仓库暂不可用：${error.code ?? "TRACE_UNAVAILABLE"}`,
     });
+    traceBook.setDocument(null);
     return null;
   }
 }
@@ -2465,6 +2542,7 @@ function showError(error) {
   clearFirstPageMessageTimer();
   activeTraceDocument = null;
   traceCapture.setDocument(null);
+  traceBook.setDocument(null);
   readyToMove = false;
   setPlaying(false);
   elements.toggle.disabled = true;
@@ -2480,6 +2558,7 @@ function showEmptyState() {
   clearTextSession();
   activeTraceDocument = null;
   traceCapture.setDocument(null);
+  traceBook.setDocument(null);
   readyToMove = false;
   activeDocumentRecord = null;
   activeFileMeta = null;
@@ -2763,6 +2842,7 @@ async function openPdf(sourceOrFactory, displayName, { fileMeta = null } = {}) {
   clearTextSession();
   activeTraceDocument = null;
   traceCapture.reset("document-changing");
+  traceBook.setDocument(null);
   cancelReadingReflow("document-changing");
   diagnosticsSession = {
     startedAt: performance.now(),

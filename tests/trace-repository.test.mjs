@@ -95,6 +95,11 @@ test("repository atomically stores a PNG crop and updates the trace reference", 
     [...readFileSync(join(rootPath, "documents", "doc-a", "traces", "trace-crop", "crop.png"))],
     [...bytes],
   );
+  const readable = await repository.readCrop("doc-a", "trace-crop");
+  assert.equal(readable.mimeType, "image/png");
+  assert.equal(readable.width, 1200);
+  assert.equal(readable.height, 800);
+  assert.deepEqual([...readable.bytes], [...bytes]);
   await assert.rejects(repository.saveCrop(
     "doc-a",
     "trace-crop",

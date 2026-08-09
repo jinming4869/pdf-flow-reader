@@ -37,6 +37,7 @@ test("smoke runner preserves the desktop security boundary and required probes",
   assert.match(runner, /uiTraceCapture/);
   assert.match(runner, /emotionCoordinate/);
   assert.match(runner, /reflowProbe/);
+  assert.match(runner, /bookTraceProbe/);
   assert.match(runner, /emotionPad/);
   assert.match(runner, /traceLassoButton/);
   assert.match(runner, /renderLassoCrop/);

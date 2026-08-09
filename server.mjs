@@ -21,6 +21,7 @@ function createStaticFiles(appRoot) {
     ["/trace-session.mjs", [join(appRoot, "trace-session.mjs"), "text/javascript; charset=utf-8"]],
     ["/trace-client.mjs", [join(appRoot, "trace-client.mjs"), "text/javascript; charset=utf-8"]],
     ["/trace-capture-controller.mjs", [join(appRoot, "trace-capture-controller.mjs"), "text/javascript; charset=utf-8"]],
+    ["/trace-book-controller.mjs", [join(appRoot, "trace-book-controller.mjs"), "text/javascript; charset=utf-8"]],
     ["/emotion-coordinate.mjs", [join(appRoot, "emotion-coordinate.mjs"), "text/javascript; charset=utf-8"]],
     ["/reflow-controller.mjs", [join(appRoot, "reflow-controller.mjs"), "text/javascript; charset=utf-8"]],
     ["/lasso-geometry.mjs", [join(appRoot, "lasso-geometry.mjs"), "text/javascript; charset=utf-8"]],

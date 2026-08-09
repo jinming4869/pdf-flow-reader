@@ -1990,6 +1990,207 @@ body.is-dragging::after {
   line-height: 1.55;
 }
 
+.trace-book-button {
+  padding: 8px 11px;
+  border: 1px solid rgba(82, 117, 98, 0.16);
+  border-radius: 999px;
+  color: var(--accent-dark);
+  background: rgba(255, 252, 244, 0.62);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 680;
+}
+
+.book-trace-panel {
+  position: fixed;
+  z-index: 70;
+  inset: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(82, 117, 98, 0.2);
+  border-radius: 28px;
+  color: #27362e;
+  background:
+    radial-gradient(circle at 16% 10%, rgba(199, 101, 67, 0.09), transparent 28%),
+    radial-gradient(circle at 84% 78%, rgba(82, 117, 98, 0.11), transparent 26%),
+    rgba(250, 247, 239, 0.98);
+  box-shadow: 0 30px 90px rgba(31, 43, 36, 0.28);
+  backdrop-filter: blur(24px);
+}
+
+.book-trace-header {
+  height: 82px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 24px;
+  border-bottom: 1px solid rgba(82, 117, 98, 0.12);
+}
+
+.book-trace-header span {
+  color: rgba(82, 117, 98, 0.58);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+}
+
+.book-trace-header h2 {
+  margin: 3px 0 0;
+  font-family: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
+  font-size: 21px;
+}
+
+.book-trace-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.book-trace-header-actions button,
+.book-trace-detail-actions button {
+  padding: 8px 12px;
+  border: 1px solid rgba(82, 117, 98, 0.18);
+  border-radius: 999px;
+  color: var(--accent-dark);
+  background: rgba(255, 255, 252, 0.72);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.book-trace-header-actions button[aria-pressed="true"] {
+  color: white;
+  background: var(--accent);
+}
+
+#bookTraceClose {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  font-size: 22px;
+}
+
+.book-trace-layout {
+  height: calc(100% - 82px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 34%);
+}
+
+.book-trace-overview {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: minmax(300px, 1fr) auto;
+  overflow: hidden;
+  padding: 20px;
+  border-right: 1px solid rgba(82, 117, 98, 0.12);
+}
+
+.book-trace-chart {
+  width: 100%;
+  height: 100%;
+  min-height: 300px;
+  border: 1px solid rgba(82, 117, 98, 0.12);
+  border-radius: 20px;
+  background: rgba(255, 255, 252, 0.58);
+}
+
+.book-trace-axis {
+  stroke: rgba(65, 82, 72, 0.18);
+  stroke-width: 1;
+}
+
+.book-trace-line {
+  fill: none;
+  stroke: rgba(82, 117, 98, 0.38);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.book-trace-point {
+  fill: #c76543;
+  stroke: #fffaf0;
+  stroke-width: 3;
+  cursor: pointer;
+  filter: drop-shadow(0 3px 6px rgba(80, 47, 34, 0.22));
+  transition: r 120ms ease, fill 120ms ease;
+}
+
+.book-trace-point:hover,
+.book-trace-point:focus {
+  r: 10;
+  fill: var(--accent);
+  outline: none;
+}
+
+.book-trace-list {
+  max-height: 150px;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 12px 2px 2px;
+}
+
+.book-trace-list button {
+  min-width: 150px;
+  padding: 10px 12px;
+  border: 1px solid rgba(82, 117, 98, 0.14);
+  border-radius: 14px;
+  color: #33433a;
+  background: rgba(255, 255, 252, 0.72);
+  cursor: pointer;
+  text-align: left;
+  font-size: 10px;
+}
+
+.book-trace-list button[aria-current="true"] {
+  border-color: rgba(199, 101, 67, 0.46);
+  box-shadow: 0 0 0 2px rgba(199, 101, 67, 0.09);
+}
+
+.book-trace-detail {
+  overflow-y: auto;
+  padding: 22px;
+}
+
+.book-trace-detail > img {
+  width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+  border-radius: 16px;
+  background: #ebe4d7;
+}
+
+#bookTraceMeta {
+  min-height: 54px;
+  margin: 14px 0;
+  color: rgba(45, 60, 51, 0.76);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+.book-emotion-pad {
+  height: 180px;
+}
+
+.book-trace-detail-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.book-trace-detail-actions button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+@media (max-width: 900px) {
+  .book-trace-panel { inset: 8px; }
+  .book-trace-layout { grid-template-columns: 1fr; overflow-y: auto; }
+  .book-trace-overview { min-height: 520px; border-right: 0; border-bottom: 1px solid rgba(82, 117, 98, 0.12); }
+  .book-trace-detail { overflow: visible; }
+}
+
 .ocr-dock {
   position: fixed;
   z-index: 24;
@@ -2480,7 +2681,9 @@ body.is-dragging::after {
   .trace-lasso-button,
   .trace-lasso-path,
   .trace-panel,
-  .emotion-marker {
+  .emotion-marker,
+  .book-trace-panel,
+  .book-trace-point {
     animation: none !important;
     transition: none !important;
     transition-delay: 0ms !important;

@@ -1,6 +1,6 @@
 # v5「航迹」线性实施工作流
 
-状态：**阶段 8 已完成；下一步为阶段 9 单书航迹**
+状态：**阶段 9 已完成；下一步为阶段 10 本机离线验收**
 
 当前优先级：先做到产品所有者本机 macOS 稳定运行，再处理 Windows 与 GitHub 公开发布适配。
 
@@ -88,7 +88,11 @@
 - [x] 接入套索返回、新书、暂停恢复、后台恢复与从头再读
 - [x] 滚轮、触摸、键盘、调速、暂停和换书立即取消
 - [x] Electron reflow start / WheelEvent cancel smoke 通过
-- [ ] 实现单书航迹散点、详情、修正、回收站与原页回跳
+- [x] 实现单书散点、readingOrder 连线、trace 列表与 crop 详情
+- [x] 实现书架情绪修正并保留 original/current
+- [x] 实现当前书原页回跳、回收站视图、TRASH 与 RESTORE
+- [x] Node 完整回归 356 / 356，Electron 单书航迹 smoke 通过
+- [ ] 完成真实 PDF、本机主观回流与 macOS 候选包验收
 
 ## 5. 阶段报告模板
 

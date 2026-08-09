@@ -228,3 +228,15 @@ PLACE_EMOTION 写入 original 与 current；REVISE_EMOTION 只更新 current。�
 ### D55：手动操作只取消入流，不强制暂停阅读
 
 滚轮、触摸、键盘、调速等立即终止曲线；若用户没有按暂停，自动阅读回到其手动速度继续。
+
+### D56：未落点 trace 只进列表，不进散点图
+
+书架不能用中心点或分类词替用户伪造情绪；只有 currentEmotion 存在时才绘制点和 readingOrder 连线。
+
+### D57：crop 通过固定 repository API 只读
+
+Renderer 只能按 documentId / traceId 请求 ready crop；主进程不暴露绝对路径或任意文件读取。
+
+### D58：当前书直接回跳，身份不匹配时明确重选
+
+只有 activeTraceDocument 与 trace.documentId 相同时直接滚动到原页；否则提示用户重选原 PDF，不按标题或路径猜测。

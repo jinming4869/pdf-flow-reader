@@ -169,3 +169,20 @@
 - 暂停、调速、触摸、键盘、后台和换书路径均有显式 cancel 连接。
 
 详细记录见 [`stage-8-explicit-reflow/README.md`](./stage-8-explicit-reflow/README.md)。
+
+## 2026-08-09：阶段 9 单书航迹复核
+
+结论：单书散点、readingOrder 连线、列表、crop 详情、书架修正、当前书回跳、回收站和恢复已经形成完整本地“回看”闭环；v5.0 功能阶段完成，进入本机发布验收。
+
+关键证据：
+
+- 单条 active trace 同时出现在散点与列表；
+- crop Uint8Array 通过固定 IPC 读取并生成 Blob 预览；
+- 书架修正 current 为 -0.5 / -0.5，original 保持 0.5 / 0.5；
+- 回跳状态为“已回到第 1 页”；
+- TRASH 后 active 列表为空，回收站显示“恢复航迹”；
+- RESTORE 后 active 列表恢复 1 项；
+- 最终没有遗留 trashed 测试数据；
+- Node 完整回归 356 / 356，Electron smoke 通过。
+
+详细记录见 [`stage-9-single-book-trace/README.md`](./stage-9-single-book-trace/README.md)。

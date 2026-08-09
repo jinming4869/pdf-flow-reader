@@ -51,6 +51,9 @@ export function createTraceClient(bridge = globalThis.nightStudyTrace ?? null) {
     listTraces(documentId, options) {
       return call("listTraces", [documentId, options]);
     },
+    readCrop(documentId, traceId) {
+      return call("readCrop", [documentId, traceId]);
+    },
     saveCrop(documentId, traceId, bytes, metadata) {
       return call("saveCrop", [documentId, traceId, bytes, metadata]);
     },

@@ -655,6 +655,120 @@ async function run() {
       throw new Error("Cancelling a lasso unexpectedly created a trace.");
     }
 
+    await productWindow.webContents.executeJavaScript(
+      `document.querySelector("#traceBookButton").click()`,
+      true,
+    );
+    await waitFor(
+      productWindow,
+      `!document.querySelector("#bookTracePanel").hidden && document.querySelector("#bookTraceList button")`,
+    );
+    await productWindow.webContents.executeJavaScript(
+      `document.querySelector("#bookTraceList button").click()`,
+      true,
+    );
+    await waitFor(
+      productWindow,
+      `!document.querySelector("#bookTraceImage").hidden && !document.querySelector("#bookTraceJump").disabled`,
+    );
+    await productWindow.webContents.executeJavaScript(`(() => {
+      const pad = document.querySelector("#bookEmotionPad");
+      const rectangle = pad.getBoundingClientRect();
+      pad.dispatchEvent(new PointerEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 99,
+        pointerType: "mouse",
+        button: 0,
+        buttons: 1,
+        clientX: rectangle.left + rectangle.width * 0.25,
+        clientY: rectangle.top + rectangle.height * 0.75,
+      }));
+      return true;
+    })()`, true);
+    await waitFor(
+      productWindow,
+      `(async () => {
+        const response = await window.nightStudyTrace.readTrace(
+          ${JSON.stringify(uiTraceCapture.documentId)},
+          ${JSON.stringify(uiTraceCapture.traceId)}
+        );
+        return response?.ok && response.value?.emotion?.current?.valence === -0.5;
+      })()`,
+    );
+    const bookTraceProbe = await productWindow.webContents.executeJavaScript(`(async () => {
+      const response = await window.nightStudyTrace.readTrace(
+        ${JSON.stringify(uiTraceCapture.documentId)},
+        ${JSON.stringify(uiTraceCapture.traceId)}
+      );
+      if (!response?.ok) throw new Error(response?.error?.message || "Unable to read book trace.");
+      return {
+        panelOpen: !document.querySelector("#bookTracePanel").hidden,
+        chartPoints: document.querySelectorAll(".book-trace-point").length,
+        listItems: document.querySelectorAll("#bookTraceList button").length,
+        imageVisible: !document.querySelector("#bookTraceImage").hidden,
+        correctedEmotion: response.value.emotion.current,
+        originalEmotion: response.value.emotion.original,
+        emotionWords: document.querySelector("#bookEmotionWords").textContent,
+      };
+    })()`, true);
+    const bookTraceScreenshot = await capture(productWindow, "electron-book-trace.png");
+
+    await productWindow.webContents.executeJavaScript(
+      `document.querySelector("#bookTraceJump").click()`,
+      true,
+    );
+    await waitFor(
+      productWindow,
+      `document.querySelector("#bookTracePanel").hidden && document.querySelector("#traceStatus").textContent.includes("已回到第 1 页")`,
+    );
+    bookTraceProbe.jumpStatus = await productWindow.webContents.executeJavaScript(
+      `document.querySelector("#traceStatus").textContent`,
+      true,
+    );
+
+    await productWindow.webContents.executeJavaScript(
+      `document.querySelector("#traceBookButton").click()`,
+      true,
+    );
+    await waitFor(productWindow, `document.querySelector("#bookTraceList button")`);
+    await productWindow.webContents.executeJavaScript(
+      `document.querySelector("#bookTraceList button").click(); document.querySelector("#bookTraceTrash").click()`,
+      true,
+    );
+    await waitFor(productWindow, `!document.querySelector("#bookTraceList button")`);
+    await productWindow.webContents.executeJavaScript(
+      `document.querySelector("#bookTraceTrashView").click()`,
+      true,
+    );
+    await waitFor(productWindow, `document.querySelector("#bookTraceList button")`);
+    await productWindow.webContents.executeJavaScript(
+      `document.querySelector("#bookTraceList button").click()`,
+      true,
+    );
+    bookTraceProbe.trashButtonLabel = await productWindow.webContents.executeJavaScript(
+      `document.querySelector("#bookTraceTrash").textContent`,
+      true,
+    );
+    await productWindow.webContents.executeJavaScript(
+      `document.querySelector("#bookTraceTrash").click()`,
+      true,
+    );
+    await waitFor(productWindow, `!document.querySelector("#bookTraceList button")`);
+    await productWindow.webContents.executeJavaScript(
+      `document.querySelector("#bookTraceTrashView").click()`,
+      true,
+    );
+    await waitFor(productWindow, `document.querySelector("#bookTraceList button")`);
+    bookTraceProbe.restoredListItems = await productWindow.webContents.executeJavaScript(
+      `document.querySelectorAll("#bookTraceList button").length`,
+      true,
+    );
+    await productWindow.webContents.executeJavaScript(
+      `document.querySelector("#bookTraceClose").click()`,
+      true,
+    );
+
     return {
       ok: true,
       security: { contextIsolation: true, nodeIntegration: false, sandbox: true },
@@ -662,11 +776,17 @@ async function run() {
       traceBridge,
       uiTraceCapture,
       reflowProbe,
+      bookTraceProbe,
       cropProbe,
       shelf,
       restartPersistence,
       reader,
-      captures: [shelfCapture, readerCapture, traceCaptureScreenshot].filter(Boolean),
+      captures: [
+        shelfCapture,
+        readerCapture,
+        traceCaptureScreenshot,
+        bookTraceScreenshot,
+      ].filter(Boolean),
     };
   } finally {
     for (const window of windows) {

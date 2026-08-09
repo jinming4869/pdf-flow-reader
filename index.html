@@ -31,6 +31,7 @@
           title="L：圈住被书触动的一瞬"
           hidden
         ><span aria-hidden="true">⌁</span><span>航迹</span></button>
+        <button id="traceBookButton" class="trace-book-button" type="button" title="查看这本书的情绪航迹" hidden>航迹图</button>
         <span id="traceStatus" class="trace-status" role="status" aria-live="polite" hidden></span>
         <button
           id="ttsPointReadButton"
@@ -198,6 +199,41 @@
       <p id="traceSummary" class="trace-summary">正在保存路径与文字…</p>
       <p class="trace-emotion-placeholder">点击平面或用方向键留下坐标；暂时不填也能回到书流。</p>
     </aside>
+
+    <section id="bookTracePanel" class="book-trace-panel" role="dialog" aria-modal="true" aria-labelledby="bookTraceTitle" hidden>
+      <header class="book-trace-header">
+        <div>
+          <span>EMOTIONAL TRAJECTORY</span>
+          <h2 id="bookTraceTitle">一本书的航迹</h2>
+        </div>
+        <div class="book-trace-header-actions">
+          <button id="bookTraceTrashView" type="button" aria-pressed="false">回收站</button>
+          <button id="bookTraceClose" type="button" aria-label="关闭单书航迹">×</button>
+        </div>
+      </header>
+      <div class="book-trace-layout">
+        <div class="book-trace-overview">
+          <svg id="bookTraceChart" class="book-trace-chart" viewBox="0 0 600 360" role="img" aria-label="效价与唤醒情绪航迹"></svg>
+          <div id="bookTraceList" class="book-trace-list" role="list"></div>
+        </div>
+        <aside class="book-trace-detail" aria-live="polite">
+          <img id="bookTraceImage" alt="" hidden />
+          <p id="bookTraceMeta">选择一个航迹点查看详情。</p>
+          <div id="bookEmotionPad" class="emotion-pad book-emotion-pad" role="application" tabindex="-1" aria-label="修正情绪坐标" aria-describedby="bookEmotionWords">
+            <span class="emotion-axis emotion-axis-negative">负面效价</span>
+            <span class="emotion-axis emotion-axis-positive">正面效价</span>
+            <span class="emotion-axis emotion-axis-high">高唤醒</span>
+            <span class="emotion-axis emotion-axis-low">低唤醒</span>
+            <span id="bookEmotionMarker" class="emotion-marker" aria-hidden="true" hidden></span>
+          </div>
+          <div id="bookEmotionWords" class="emotion-words">尚未落点</div>
+          <div class="book-trace-detail-actions">
+            <button id="bookTraceJump" type="button" disabled>回到原页</button>
+            <button id="bookTraceTrash" type="button" disabled>移入回收站</button>
+          </div>
+        </aside>
+      </div>
+    </section>
 
     <aside id="ocrDock" class="ocr-dock" aria-label="OCR 扫描增强" hidden>
       <button id="ocrButton" type="button" aria-describedby="ocrHelp" disabled>

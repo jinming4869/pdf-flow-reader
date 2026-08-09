@@ -44,6 +44,10 @@ test("trace IPC registers an allowlisted facade and disposes every handler", asy
     async createDraft(payload) { calls.push(["create", payload]); return { id: payload.id, revision: 1 }; },
     async readTrace(documentId, traceId) { calls.push(["read", documentId, traceId]); return { id: traceId }; },
     async listTraces(documentId, options) { calls.push(["list", documentId, options]); return []; },
+    async readCrop(documentId, traceId) {
+      calls.push(["read-crop", documentId, traceId]);
+      return { mimeType: "image/png", width: 10, height: 10, bytes: Uint8Array.from([1]) };
+    },
     async saveCrop(documentId, traceId, bytes, metadata, options) {
       calls.push(["crop", documentId, traceId, bytes, metadata, options]);
       return { id: traceId, crop: { state: "ready" }, revision: 2 };
@@ -74,6 +78,10 @@ test("trace IPC registers an allowlisted facade and disposes every handler", asy
     documentId: "doc-a",
     includeTrashed: true,
   }), []);
+  assert.deepEqual(await ipcMain.invoke(TRACE_IPC_CHANNELS.readCrop, {
+    documentId: "doc-a",
+    traceId: "trace-a",
+  }), { mimeType: "image/png", width: 10, height: 10, bytes: Uint8Array.from([1]) });
   assert.deepEqual(await ipcMain.invoke(TRACE_IPC_CHANNELS.saveCrop, {
     documentId: "doc-a",
     traceId: "trace-a",
@@ -89,7 +97,7 @@ test("trace IPC registers an allowlisted facade and disposes every handler", asy
     event: { type: "CROP_FAILED", errorCode: "X" },
     expectedRevision: 1,
   }), { id: "trace-a", revision: 2 });
-  assert.equal(calls.length, 6);
+  assert.equal(calls.length, 7);
 
   await assert.rejects(
     ipcMain.invoke(
@@ -113,6 +121,7 @@ test("production preload exposes narrow trace methods without raw ipcRenderer", 
     "createDraft",
     "readTrace",
     "listTraces",
+    "readCrop",
     "saveCrop",
     "transitionTrace",
     "pathForFile",

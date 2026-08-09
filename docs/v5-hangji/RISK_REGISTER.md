@@ -21,7 +21,9 @@
 | R13 | Zotero Prompt 来源与成果归档耦合 | 中 | 阶段 12 | 两个独立模块；不读取 prefs.js；正式 API PoC | 开放 |
 | R14 | 全文 OCR 和长上下文分析在扫描书上失控 | 高 | 阶段 12 | 明确二次授权；页数/字符/成本预览；分块 PoC；可取消 | 开放 |
 | R15 | 私人 PDF、正文、裁图、路径或密钥进入 Git/日志/AI | 高 | 全阶段 | 私人样本仅本地；内容扫描；诊断无内容；外部发送逐项授权 | 开放 |
-| R16 | 为公开发布过早扩张 Windows/CI，拖慢本机可用目标 | 中 | 阶段 14 | 阶段 0–13 先保证本机 macOS；公开发布适配单独阶段与授权 | 已缓解 |
+| R16 | 为公开发布过早扩张 Windows/CI，拖慢本机可用目标 | 中 | 阶段 14 | 阶段 0–13 先保证本机 macOS；公开发布适配单独阶段与授权 | 已关闭：macOS beta 已交付，GitHub 适配未启动 |
+| R17 | kokoro-js → transformers → sharp/libvips high advisory | 高 | 公开发布 | 评估升级、裁剪或证明不可达；不自动 audit fix | 开放：3 high、0 critical、无可用自动修复 |
+| R18 | macOS /tmp 与 /private/tmp 导致英文 worker 不注册 | 高 | 阶段 10 | argv 与 modulePath 使用 realpath 比较，并打包回归 | 已关闭：worker 回归与最终三语言 smoke 通过 |
 
 ## 风险处理规则
 

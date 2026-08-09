@@ -4,7 +4,19 @@
 
 ## Unreleased
 
-暂无。
+### v5.0.0-beta.1 本机候选
+
+- 新增 v4.1 书架轮播与开书动画。
+- 新增显式丝带环套索、墨线轨迹、自动暂停和本地草稿留痕。
+- 新增 PDF.js 内容身份、原子 trace repository、损坏恢复、revision 防覆盖和 30 天回收站。
+- 新增带上下文矩形 PNG 裁图、连续效价 × 唤醒坐标、pointer / 键盘修正与邻域词解释。
+- 新增 30 / 90 秒档内回流曲线，滚轮、触摸、键盘、调速和暂停立即取消。
+- 新增单书情绪航迹、readingOrder 连线、crop 详情、坐标修正、当前书原页回跳和回收站恢复。
+- Node 回归扩展到 358 项；新增正式 Electron preload / IPC / renderer / PDF / crop / 航迹 smoke。
+- 新增 packaged headless main 验收，并修复 macOS `/tmp` / `/private/tmp` 别名导致英文 TTS worker 提前退出的问题。
+- 已生成并验证 macOS arm64 本机 beta ZIP；中、日、英离线朗读和硬取消通过。
+
+本条目只描述本机 beta 候选。真实私人 PDF、主观回流和公开发布适配仍需后续验收；尚未创建 GitHub tag 或 release。
 
 ## v4.0.0 - 2026-08-01
 

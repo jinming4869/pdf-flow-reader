@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -114,6 +114,22 @@ export function createKokoroWorkerRuntime({ loadModel = loadKokoroModel } = {}) 
   };
 }
 
+export function isKokoroWorkerEntrypoint({
+  argvPath = process.argv[1],
+  modulePathValue = modulePath,
+  realpathImpl = realpathSync,
+} = {}) {
+  if (!argvPath) return false;
+  const canonical = (value) => {
+    try {
+      return realpathImpl(resolve(value));
+    } catch {
+      return resolve(value);
+    }
+  };
+  return canonical(argvPath) === canonical(modulePathValue);
+}
+
 export function startKokoroWorker({
   processRef = process,
   runtime = createKokoroWorkerRuntime(),
@@ -127,6 +143,6 @@ export function startKokoroWorker({
   });
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === modulePath) {
+if (isKokoroWorkerEntrypoint()) {
   startKokoroWorker();
 }

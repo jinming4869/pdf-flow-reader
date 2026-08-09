@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, shell } from "electron";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,6 +10,15 @@ import { createTraceRepository } from "./trace-repository.mjs";
 const appRoot = dirname(fileURLToPath(import.meta.url));
 const applicationName = "夜晚的书斋";
 const iconCheckIntervalMs = 5 * 60 * 1000;
+const headlessSmokeMode = process.env.NIGHT_STUDY_HEADLESS_SMOKE === "1";
+const smokeUserData = process.env.NIGHT_STUDY_SMOKE_USER_DATA
+  ? resolve(process.env.NIGHT_STUDY_SMOKE_USER_DATA)
+  : null;
+
+if (headlessSmokeMode && smokeUserData) {
+  mkdirSync(smokeUserData, { recursive: true });
+  app.setPath("userData", smokeUserData);
+}
 
 let mainWindow = null;
 let readerServer = null;
@@ -137,6 +146,32 @@ async function initializeTraceInfrastructure() {
   }
 }
 
+async function runHeadlessSmoke(window) {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    const result = await window.webContents.executeJavaScript(`(() => ({
+      title: document.title,
+      documentName: document.querySelector("#documentName")?.textContent || "",
+      canvasCount: document.querySelectorAll("canvas.page-canvas").length,
+      traceLassoVisible: !document.querySelector("#traceLassoButton")?.hidden,
+      traceBookVisible: !document.querySelector("#traceBookButton")?.hidden,
+      errorHidden: document.querySelector("#errorPanel")?.hidden ?? false,
+      emptyVisible: !document.querySelector("#emptyState")?.hidden,
+    }))()`, true);
+    const ready = pendingPdfPath
+      ? result.canvasCount > 0 && result.traceLassoVisible && result.errorHidden
+      : result.emptyVisible;
+    if (ready) {
+      return {
+        version: app.getVersion(),
+        ...result,
+      };
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  throw new Error("Packaged headless smoke timed out before the reader became ready.");
+}
+
 async function createMainWindow() {
   const url = await ensureReaderServer();
   const initialIcon = iconImageForMode(iconModeForDate());
@@ -160,7 +195,7 @@ async function createMainWindow() {
 
   mainWindow.once("ready-to-show", () => {
     applyApplicationIcon(new Date(), { force: true });
-    mainWindow?.show();
+    if (!headlessSmokeMode) mainWindow?.show();
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
@@ -175,6 +210,11 @@ async function createMainWindow() {
   });
 
   await mainWindow.loadURL(url);
+  if (headlessSmokeMode) {
+    const result = await runHeadlessSmoke(mainWindow);
+    console.log(`HEADLESS_SMOKE_RESULT ${JSON.stringify(result)}`);
+    setTimeout(() => app.quit(), 0);
+  }
 }
 
 function installApplicationMenu() {

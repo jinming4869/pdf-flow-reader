@@ -186,3 +186,20 @@
 - Node 完整回归 356 / 356，Electron smoke 通过。
 
 详细记录见 [`stage-9-single-book-trace/README.md`](./stage-9-single-book-trace/README.md)。
+
+## 2026-08-09：阶段 10 macOS beta 自动化复核
+
+结论：5.0.0-beta.1 macOS arm64 候选已完成源码回归、目录包、真正 packaged main、三语言 TTS、硬取消、ad-hoc strict codesign 与 ZIP 校验；自动化部分通过，仍等待产品所有者真实 PDF 和主观回流验收。
+
+关键证据：
+
+- Node 完整回归 358 / 358；
+- packaged headless main 打开旋转 PDF，canvas=1，航迹与航迹图入口可见；
+- 中文、日文、英文 24kHz 语音通过；
+- CJK 硬取消与 worker 重建通过；
+- `/tmp` / `/private/tmp` worker 入口别名缺陷已修复并有测试；
+- 最终 bundle ad-hoc strict verify 通过；
+- ZIP 约 374MB，SHA-256 为 `9ad0dd7825846b9345808b25a2ed2407bd70694d2c90df6e9ac67960ae0f0de0`；
+- 未推送 GitHub，未创建 tag 或 release。
+
+依赖审计仍有 kokoro-js 间接 sharp/libvips 的 3 个 high advisory，无自动修复；公开发布前必须处理。详细记录见 [`stage-10-local-mac-beta/README.md`](./stage-10-local-mac-beta/README.md)。

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   createKokoroWorkerRuntime,
+  isKokoroWorkerEntrypoint,
   resolveEnglishTtsModelsDir,
 } from "../tts-worker.mjs";
 import { parsePcmWav } from "../wav-pcm.mjs";
@@ -24,6 +25,20 @@ test("English model discovery returns null instead of allowing a remote fallback
     appRoot: "/app",
     existsImpl: () => false,
   }), null);
+});
+
+test("worker entrypoint resolves macOS /tmp and /private/tmp aliases", () => {
+  const realpathImpl = (value) => value.replace(/^\/tmp\//, "/private/tmp/");
+  assert.equal(isKokoroWorkerEntrypoint({
+    argvPath: "/tmp/night-study/tts-worker.mjs",
+    modulePathValue: "/private/tmp/night-study/tts-worker.mjs",
+    realpathImpl,
+  }), true);
+  assert.equal(isKokoroWorkerEntrypoint({
+    argvPath: "/tmp/other/tts-worker.mjs",
+    modulePathValue: "/private/tmp/night-study/tts-worker.mjs",
+    realpathImpl,
+  }), false);
 });
 
 test("importing the worker module does not register a process message listener", async () => {

@@ -99,6 +99,7 @@ export function createTtsScheduler({
   let lastSpeech = null;
   let playbackLocked = false;
   let prefetch = null;
+  let continuousPrefetchQueue = [];
   let prefetchQueued = 0;
   let prefetchCompleted = 0;
   let prefetchUsed = 0;
@@ -119,17 +120,47 @@ export function createTtsScheduler({
     return skippedPick(pick, reason);
   }
 
+  function continuousPrefetches() {
+    return [prefetch, ...continuousPrefetchQueue]
+      .filter((slot) => slot?.kind === "continuous");
+  }
+
+  function hasContinuousPrefetch(slot) {
+    return prefetch === slot || continuousPrefetchQueue.includes(slot);
+  }
+
+  function removeContinuousPrefetch(slot) {
+    if (prefetch === slot) {
+      prefetch = continuousPrefetchQueue.shift() ?? null;
+      return true;
+    }
+    const index = continuousPrefetchQueue.indexOf(slot);
+    if (index < 0) return false;
+    continuousPrefetchQueue.splice(index, 1);
+    return true;
+  }
+
   function abortPrefetch(reason = "prefetch-discarded", {
     key = null,
     contextKey = null,
     cancelProvider = true,
   } = {}) {
-    if (!prefetch) return false;
-    if (key && prefetch.key !== key) return false;
-    if (contextKey && prefetch.contextKey !== contextKey) return false;
-    const discarded = prefetch;
-    prefetch = null;
-    if (!discarded.controller.signal.aborted) discarded.controller.abort();
+    const slots = [prefetch, ...continuousPrefetchQueue].filter(Boolean);
+    const discarded = slots.filter((slot) => (
+      (!key || slot.key === key) &&
+      (!contextKey || slot.contextKey === contextKey)
+    ));
+    if (!discarded.length) return false;
+    for (const slot of discarded) {
+      if (!slot.controller.signal.aborted) slot.controller.abort();
+    }
+    if (discarded.includes(prefetch)) prefetch = null;
+    continuousPrefetchQueue = continuousPrefetchQueue.filter(
+      (slot) => !discarded.includes(slot),
+    );
+    if (!prefetch && continuousPrefetchQueue.length) {
+      prefetch = continuousPrefetchQueue.shift();
+    }
     if (cancelProvider) provider?.cancel?.();
     status = reason;
     return true;
@@ -142,35 +173,59 @@ export function createTtsScheduler({
       activeController = null;
       cancelled += 1;
     }
-    if (prefetch?.controller) {
-      prefetch.controller.abort();
-      prefetch = null;
-    }
+    abortPrefetch(reason, { cancelProvider: false });
     provider?.cancel?.();
     status = reason;
   }
 
-  function nextPrefetchPick(chunks = [], currentKeyValue, speech = null) {
-    if (!speech?.prefetchNext) return null;
+  function prefetchPlansCompatible(slot, pick, plannedSpeech) {
+    if (!slot || slot.key !== pick?.key) return false;
+    if (textForSpeech(slot.pick?.chunk, slot.speech) !== textForSpeech(pick?.chunk, plannedSpeech)) {
+      return false;
+    }
+    const aesthetic = slot.speech?.tierKey === "aesthetic-walk"
+      || plannedSpeech?.tierKey === "aesthetic-walk";
+    if (!aesthetic) {
+      return prefetchPlanSignature(slot.pick, slot.speech)
+        === prefetchPlanSignature(pick, plannedSpeech);
+    }
+    if (
+      slot.speech?.utterancePlan?.decision === "skip" ||
+      plannedSpeech?.utterancePlan?.decision === "skip"
+    ) {
+      return false;
+    }
+    return Math.abs(
+      (Number(slot.speech?.speed) || 0) - (Number(plannedSpeech?.speed) || 0),
+    ) <= 0.2;
+  }
+
+  function nextPrefetchTargets(chunks = [], currentKeyValue, speech = null) {
+    if (!speech?.prefetchNext) return [];
+    const depth = Math.max(1, Math.min(2, Math.floor(Number(speech.prefetchDepth) || 1)));
     const ordered = [...chunks]
       .filter((chunk) => keyForChunk(chunk))
       .sort((a, b) => (Number(a.pageIndex) - Number(b.pageIndex)) || (Number(a.chunkIndex) - Number(b.chunkIndex)));
     const index = ordered.findIndex((chunk) => keyForChunk(chunk) === currentKeyValue);
-    if (index < 0) return null;
+    if (index < 0) return [];
+    const targets = [];
     for (const chunk of ordered.slice(index + 1)) {
-      if (isTtsEligibleChunk(chunk, speech)) {
-        return { chunk, key: keyForChunk(chunk) };
-      }
+      if (!isTtsEligibleChunk(chunk, speech)) continue;
+      const pick = { chunk, key: keyForChunk(chunk) };
+      const plannedSpeech = speechForChunk(speech, chunk);
+      if (plannedSpeech?.utterancePlan?.decision === "skip") continue;
+      targets.push({ pick, speech: plannedSpeech });
+      if (targets.length >= depth) break;
     }
-    return null;
+    return targets;
   }
 
-  function startPrefetch({ chunks = [], currentPick, pageNumber = 0, documentGeneration = 0, speech = null } = {}) {
-    if (!provider || !speech?.prefetchNext || !currentPick?.key) return;
-    const pick = nextPrefetchPick(chunks, currentPick.key, speech);
-    if (!pick || prefetch?.key === pick.key) return;
-    const plannedSpeech = speechForChunk(speech, pick.chunk);
-    if (plannedSpeech?.utterancePlan?.decision === "skip") return;
+  function createContinuousPrefetchSlot({
+    pick,
+    plannedSpeech,
+    pageNumber,
+    documentGeneration,
+  }) {
     const targetPageNumber = Number.isInteger(pick.chunk?.pageIndex)
       ? pick.chunk.pageIndex + 1
       : pageNumber;
@@ -189,7 +244,6 @@ export function createTtsScheduler({
       promise: null,
       result: null,
     };
-    prefetch = slot;
     slot.promise = Promise.resolve()
       .then(() => {
         if (controller.signal.aborted || runGeneration !== generation) throw abortError();
@@ -207,15 +261,44 @@ export function createTtsScheduler({
       })
       .then((result) => {
         if (controller.signal.aborted || runGeneration !== generation) throw abortError();
-        prefetchCompleted += 1;
-        if (prefetch === slot) slot.result = result;
+        if (hasContinuousPrefetch(slot)) {
+          prefetchCompleted += 1;
+          slot.result = result;
+        }
         return result;
       })
       .catch((error) => {
         if (error?.name !== "AbortError") prefetchFailed += 1;
-        if (prefetch === slot) prefetch = null;
+        removeContinuousPrefetch(slot);
         return null;
       });
+    return slot;
+  }
+
+  function startPrefetch({ chunks = [], currentPick, pageNumber = 0, documentGeneration = 0, speech = null } = {}) {
+    if (!provider || !speech?.prefetchNext || !currentPick?.key || prefetch?.kind === "explicit") return;
+    const targets = nextPrefetchTargets(chunks, currentPick.key, speech);
+    if (!targets.length) return;
+    let existing = continuousPrefetches();
+    const incompatible = existing.some((slot) => {
+      const target = targets.find((candidate) => candidate.pick.key === slot.key);
+      return !target || !prefetchPlansCompatible(slot, target.pick, target.speech);
+    });
+    if (incompatible) {
+      abortPrefetch("prefetch-window-changed");
+      existing = [];
+    }
+    const slots = targets.map((target) => (
+      existing.find((slot) => prefetchPlansCompatible(slot, target.pick, target.speech))
+      ?? createContinuousPrefetchSlot({
+        pick: target.pick,
+        plannedSpeech: target.speech,
+        pageNumber,
+        documentGeneration,
+      })
+    ));
+    prefetch = slots.shift() ?? null;
+    continuousPrefetchQueue = slots;
   }
 
   function prepare({
@@ -317,6 +400,7 @@ export function createTtsScheduler({
     }
 
     prefetch = null;
+    continuousPrefetchQueue = [];
     const pick = slot.pick;
     const result = slot.result;
     currentKey = requestedKey;
@@ -354,6 +438,7 @@ export function createTtsScheduler({
     pageNumber = 0,
     documentGeneration = 0,
     speech = null,
+    preferredKey = null,
   } = {}) {
     if (!isPlaying) {
       cancel("paused");
@@ -365,7 +450,19 @@ export function createTtsScheduler({
       return lastPick;
     }
 
-    const pick = pickReadableChunk(chunks, { normalizedReadingY, minPriority });
+    const preferredChunk = preferredKey
+      ? chunks.find((chunk) => (
+          keyForChunk(chunk) === preferredKey && isTtsEligibleChunk(chunk, speech)
+        ))
+      : null;
+    const pick = preferredChunk
+      ? {
+          key: preferredKey,
+          chunk: preferredChunk,
+          normalizedReadingY,
+          distance: 0,
+        }
+      : pickReadableChunk(chunks, { normalizedReadingY, minPriority });
     lastPick = pick;
     if (!pick?.chunk) {
       status = "waiting-for-readable-chunk";
@@ -381,42 +478,40 @@ export function createTtsScheduler({
       return pick;
     }
 
-    if (prefetch?.kind !== "explicit" && prefetch?.key === pick.key) {
-      const prefetchedSignature = prefetchPlanSignature(
-        prefetch.pick,
-        prefetch.speech,
-      );
-      const activeSignature = prefetchPlanSignature(pick, activeSpeech);
-      if (prefetchedSignature !== activeSignature) {
-        abortPrefetch("prefetch-plan-changed");
-      }
+    if (
+      prefetch?.kind === "continuous" &&
+      prefetch.key === pick.key &&
+      !prefetchPlansCompatible(prefetch, pick, activeSpeech)
+    ) {
+      abortPrefetch("prefetch-plan-changed");
     }
 
-    if (prefetch?.kind !== "explicit" && prefetch?.key === pick.key) {
+    if (prefetch?.kind === "continuous" && prefetch.key === pick.key) {
       const awaitedPrefetch = prefetch;
       const prefetchGeneration = generation;
+      const playbackSpeech = awaitedPrefetch.speech;
       playbackLocked = true;
       currentKey = pick.key;
       lastPick = pick;
-      lastSpeech = activeSpeech;
+      lastSpeech = playbackSpeech;
       status = awaitedPrefetch.result ? "prefetch-hit" : "waiting-prefetch";
-      if (speechIsLate(activeSpeech) || speechIsLate(awaitedPrefetch.speech)) {
+      if (speechIsLate(activeSpeech) || speechIsLate(playbackSpeech)) {
         abortPrefetch("prefetch-late");
         return markSkipped(pick, activeSpeech, "late-skip");
       }
-      onPick?.({ pick, pageNumber, documentGeneration, speech: activeSpeech });
+      onPick?.({ pick, pageNumber, documentGeneration, speech: playbackSpeech });
       const result = awaitedPrefetch.result ?? await awaitedPrefetch.promise;
       if (
         prefetchGeneration !== generation ||
         awaitedPrefetch.controller.signal.aborted
       ) {
-        if (prefetch === awaitedPrefetch) prefetch = null;
+        removeContinuousPrefetch(awaitedPrefetch);
         playbackLocked = false;
         return null;
       }
-      if (prefetch === awaitedPrefetch) prefetch = null;
+      removeContinuousPrefetch(awaitedPrefetch);
       if (result) {
-        if (speechIsLate(activeSpeech) || speechIsLate(awaitedPrefetch.speech)) {
+        if (speechIsLate(activeSpeech) || speechIsLate(playbackSpeech)) {
           return markSkipped(pick, activeSpeech, "late-skip");
         }
         prefetchUsed += 1;
@@ -429,7 +524,7 @@ export function createTtsScheduler({
           currentPick: pick,
           pageNumber,
           documentGeneration,
-          speech: activeSpeech,
+          speech: playbackSpeech,
         });
         return { ...pick, result };
       }
@@ -540,6 +635,12 @@ export function createTtsScheduler({
             pick: previewPickedChunk(prefetch.pick),
           }
         : null,
+      prefetches: continuousPrefetches().map((slot) => ({
+        kind: "continuous",
+        key: slot.key,
+        ready: Boolean(slot.result),
+        pick: previewPickedChunk(slot.pick),
+      })),
       prefetchQueued,
       prefetchCompleted,
       prefetchUsed,

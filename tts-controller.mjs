@@ -31,6 +31,47 @@ function temporarySpeechSpeed(policy) {
   return 1.25;
 }
 
+function keyForChunk(chunk) {
+  if (!chunk) return null;
+  return `${chunk.source ?? "unknown"}:${chunk.pageIndex ?? 0}:${chunk.chunkIndex ?? 0}`;
+}
+
+function readyContinuousPrefetchKey({
+  lastChunkKey,
+  prefetch,
+  chunks,
+  normalizedReadingY,
+  maxNormalizedLead,
+} = {}) {
+  if (
+    !lastChunkKey ||
+    prefetch?.kind !== "continuous" ||
+    !prefetch.ready ||
+    !prefetch.key ||
+    prefetch.key === lastChunkKey
+  ) {
+    return null;
+  }
+  const ordered = [...chunks].sort((a, b) => (
+    finiteNumber(a?.pageIndex) - finiteNumber(b?.pageIndex) ||
+    finiteNumber(a?.chunkIndex) - finiteNumber(b?.chunkIndex)
+  ));
+  const previousIndex = ordered.findIndex(
+    (candidate) => keyForChunk(candidate) === lastChunkKey,
+  );
+  const chunk = previousIndex >= 0 ? ordered[previousIndex + 1] : null;
+  const box = chunk?.normalizedBbox;
+  if (!chunk || keyForChunk(chunk) !== prefetch.key || !box) return null;
+  const readingY = finiteNumber(normalizedReadingY);
+  const start = finiteNumber(box.y);
+  const end = start + finiteNumber(box.height);
+  const lead = start - readingY;
+  if (end < readingY - 0.04) return null;
+  return lead <= Math.max(0, finiteNumber(maxNormalizedLead))
+    ? prefetch.key
+    : null;
+}
+
 function transformedChunksForPolicy(chunks, policy, { explicitTarget = false } = {}) {
   return chunks
     .filter((chunk) => isChunkAllowedByPolicy(chunk, policy, { explicitTarget }))
@@ -302,7 +343,7 @@ export function createTtsController({
     let eligibleChunks = transformedChunksForPolicy(sourceChunks, policy, {
       explicitTarget: manual,
     });
-    const eligiblePrefetchChunks = !manual && policy.tierKey === "snow-mist"
+    const eligiblePrefetchChunks = !manual && ["snow-mist", "aesthetic-walk"].includes(policy.tierKey)
       ? transformedChunksForPolicy(prefetchChunks, policy)
       : [];
     if (!manual && policy.tierKey === "aesthetic-walk") {
@@ -320,11 +361,23 @@ export function createTtsController({
         }),
       }));
     }
+    const preferredKey = !manual && policy.autoRead === "continuous"
+      ? readyContinuousPrefetchKey({
+          lastChunkKey,
+          prefetch: scheduler?.snapshot?.()?.prefetch,
+          chunks: eligibleChunks,
+          normalizedReadingY,
+          maxNormalizedLead: policy.prefetch.maxNormalizedLead,
+        })
+      : null;
+    const preferredChunk = preferredKey
+      ? eligibleChunks.find((chunk) => keyForChunk(chunk) === preferredKey)
+      : null;
     const pick = manualAction === "point-sentence"
       ? (
           eligibleChunks[0]
             ? {
-                key: eligibleChunks[0].speechKey ?? `${eligibleChunks[0].source ?? "unknown"}:${eligibleChunks[0].pageIndex ?? 0}:${eligibleChunks[0].chunkIndex ?? 0}`,
+                key: eligibleChunks[0].speechKey ?? keyForChunk(eligibleChunks[0]),
                 chunk: eligibleChunks[0],
                 normalizedReadingY,
                 distance: 0,
@@ -336,10 +389,17 @@ export function createTtsController({
           normalizedReadingY,
           minPriority,
         })
-      : pickReadableChunk(eligibleChunks, {
-          normalizedReadingY,
-          minPriority,
-        });
+      : preferredChunk
+        ? {
+            key: preferredKey,
+            chunk: preferredChunk,
+            normalizedReadingY,
+            distance: 0,
+          }
+        : pickReadableChunk(eligibleChunks, {
+            normalizedReadingY,
+            minPriority,
+          });
     if (!pick?.chunk) {
       emit({ status: "waiting-for-readable-chunk" });
       return null;
@@ -370,6 +430,7 @@ export function createTtsController({
       normalizedReadingY: schedulerReadingY,
       pageNumber,
       documentGeneration,
+      preferredKey,
       speech: {
         tierKey: policy.tierKey,
         speed: pick.chunk.utterancePlan?.speed ?? temporarySpeechSpeed(policy),
@@ -378,6 +439,7 @@ export function createTtsController({
         action: manualAction,
         requestId: pick.chunk.pointReadRequestId ?? null,
         prefetchNext: Boolean(policy.prefetch.enabled && !manual),
+        prefetchDepth: policy.prefetch.depth,
         firstSentenceOnly: manualAction === "read-line-sentence",
         allowFootnote: !policy.filter.excludedRoles.includes("footnote"),
         requireLead: false,

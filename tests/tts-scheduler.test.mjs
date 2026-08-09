@@ -195,6 +195,101 @@ test("aesthetic-walk prefetch keeps the next chunk's own plan", async () => {
   ]);
 });
 
+test("continuous speech keeps a bounded two-chunk prefetch window", async () => {
+  const calls = [];
+  const provider = {
+    ...createNullTtsProvider(),
+    async synthesize(input) {
+      calls.push(input.text);
+      return createNullTtsProvider().synthesize(input);
+    },
+  };
+  const scheduler = createTtsScheduler({ provider });
+  const chunks = [
+    chunk(1, 0.2, "First chunk."),
+    chunk(2, 0.32, "Second chunk."),
+    chunk(3, 0.44, "Third chunk."),
+    chunk(4, 0.56, "Fourth chunk."),
+  ];
+
+  await scheduler.update({
+    isPlaying: true,
+    chunks,
+    normalizedReadingY: 0.21,
+    speech: {
+      tierKey: "snow-mist",
+      speed: 1.18,
+      prefetchNext: true,
+      prefetchDepth: 2,
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(
+    scheduler.snapshot().prefetches.map((entry) => entry.key),
+    ["native-text:0:2", "native-text:0:3"],
+  );
+  assert.deepEqual(calls, ["First chunk.", "Second chunk.", "Third chunk."]);
+});
+
+test("aesthetic-walk reuses prefetched audio across a small speed drift", async () => {
+  const seen = [];
+  const provider = {
+    ...createNullTtsProvider(),
+    async synthesize(input) {
+      seen.push({ text: input.text, speed: input.speed });
+      return createNullTtsProvider().synthesize(input);
+    },
+  };
+  const scheduler = createTtsScheduler({ provider, now: () => 1_000 });
+  const first = chunk(1, 0.2, "First chunk.");
+  first.utterancePlan = {
+    kind: "aesthetic-walk",
+    decision: "full",
+    text: first.text,
+    speed: 1.5,
+    latestStartAtMs: 4_000,
+  };
+  const second = chunk(2, 0.31, "Second sentence.");
+  second.utterancePlan = {
+    kind: "aesthetic-walk",
+    decision: "full",
+    text: second.text,
+    speed: 1.6,
+    latestStartAtMs: 5_000,
+  };
+  await scheduler.update({
+    isPlaying: true,
+    chunks: [first, second],
+    normalizedReadingY: 0.21,
+    speech: { tierKey: "aesthetic-walk", speed: 1.5, prefetchNext: true },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  scheduler.releasePlaybackLock();
+  const gentlyFasterSecond = {
+    ...second,
+    utterancePlan: {
+      ...second.utterancePlan,
+      speed: 1.72,
+      latestStartAtMs: 4_600,
+    },
+  };
+  await scheduler.update({
+    isPlaying: true,
+    chunks: [first, gentlyFasterSecond],
+    normalizedReadingY: 0.32,
+    speech: { tierKey: "aesthetic-walk", speed: 1.72, prefetchNext: true },
+  });
+
+  assert.deepEqual(seen, [
+    { text: "First chunk.", speed: 1.5 },
+    { text: "Second sentence.", speed: 1.6 },
+  ]);
+  assert.equal(scheduler.snapshot().prefetchUsed, 1);
+  assert.equal(scheduler.snapshot().lastSpeech.speed, 1.6);
+});
+
 test("aesthetic-walk discards a prefetched plan after the visual rate changes", async () => {
   const seen = [];
   const provider = {

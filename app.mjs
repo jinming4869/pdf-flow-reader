@@ -61,7 +61,10 @@ import {
   shouldCancelPolicyTransition,
   shouldPreserveContinuousSpeechOnPageChange,
 } from "./tts-policy.mjs";
-import { pickTtsProvider } from "./tts-provider.mjs";
+import {
+  createTtsWarmupRequest,
+  pickTtsProvider,
+} from "./tts-provider.mjs";
 import { createTtsScheduler } from "./tts-scheduler.mjs";
 import {
   advanceParagraphFlowContext,
@@ -124,6 +127,7 @@ const elements = {
   rhythmEcho: document.querySelector("#rhythmEcho"),
   clearRecords: document.querySelector("#clearRecords"),
   documentName: document.querySelector("#documentName"),
+  homeButton: document.querySelector("#homeButton"),
   fileButton: document.querySelector("#fileButton"),
   filePicker: document.querySelector("#filePicker"),
   controls: document.querySelector("#controls"),
@@ -274,11 +278,14 @@ let homeBookIndex = 0;
 let homeBookSelectedId = null;
 let homeBookTakeTimer = 0;
 let homeBookWheelLocked = false;
+let returningHome = false;
 let persistTimer = 0;
 let restoreMessageTimer = 0;
 const ttsProvider = pickTtsProvider(ttsProviderConfigFromPreferences(localState.preferences));
 let ttsWarmupPromise = null;
 let ttsWarmupStatus = "idle";
+let ttsWarmupActiveKey = null;
+const ttsWarmupReadyKeys = new Set();
 let ttsUtteranceLocked = false;
 let ttsRuntimeActivationPromise = null;
 let activeTtsTierKey = speedTier(speed).themeKey;
@@ -530,6 +537,8 @@ function collectTtsChainDiagnostics() {
       tier: speedTier(speed).themeKey,
       ttsTierEnabled: isTtsTierEnabled(),
       warmupStatus: ttsWarmupStatus,
+      warmupActiveKey: ttsWarmupActiveKey,
+      warmupReadyKeys: [...ttsWarmupReadyKeys].sort(),
       utteranceLocked: ttsUtteranceLocked,
       lineVisible: Boolean(document.querySelector(".tts-focus")),
       modeButtonText: elements.ttsModeButton?.textContent ?? null,
@@ -938,10 +947,27 @@ function updateManualReadControl() {
   elements.ttsManualReadButton.disabled = !visible || !currentPageHasLineSpeechTarget();
 }
 
+function currentTtsWarmupRequest(pageNumber = activeReadingPage || currentPageNumber()) {
+  if (!pageNumber) return null;
+  return createTtsWarmupRequest([
+    ...readableChunksForPage(pageNumber),
+    ...continuousSpeechPrefetchChunks(pageNumber, currentTtsPolicy()),
+  ]);
+}
+
+function isTtsWarmupReady(request = currentTtsWarmupRequest()) {
+  return Boolean(
+    request?.runtimeKeys?.length &&
+    request.runtimeKeys.every((key) => ttsWarmupReadyKeys.has(key))
+  );
+}
+
 function ensureTtsRuntimeActive(reason = "tts-visible") {
   if (!isTtsControlAllowed() || !ttsController.isEnabled() || !isTtsTierEnabled()) {
     return;
   }
+  const warmupRequest = currentTtsWarmupRequest();
+  if (!warmupRequest) return;
   ttsAudioPlayer.setMuted(false);
   localState = updateTtsPreferences(localState, { ttsMuted: false });
   writeLocalState(localState);
@@ -950,18 +976,20 @@ function ensureTtsRuntimeActive(reason = "tts-visible") {
   const context = {
     controllerGeneration: ttsController.getGeneration(),
     tierKey: currentTtsPolicy().tierKey,
+    warmupKey: warmupRequest.key,
   };
   const contextIsCurrent = () => Boolean(
     ttsController.isEnabled() &&
     isTtsTierEnabled() &&
     ttsController.getGeneration() === context.controllerGeneration &&
-    currentTtsPolicy().tierKey === context.tierKey
+    currentTtsPolicy().tierKey === context.tierKey &&
+    currentTtsWarmupRequest()?.key === context.warmupKey
   );
   ttsRuntimeActivationPromise = Promise.resolve()
     .then(async () => {
-      let ready = await warmupTtsProvider();
+      let ready = await warmupTtsProvider(warmupRequest);
       if (ready !== true && contextIsCurrent()) {
-        ready = await warmupTtsProvider();
+        ready = await warmupTtsProvider(warmupRequest);
       }
       if (ready !== true || !contextIsCurrent()) return false;
       renderTtsReadingLine(activeReadingPage || currentPageNumber(), { phase: "tracking" });
@@ -1042,6 +1070,12 @@ function settlePointReadPlayback(outcome = "ended", token = null) {
 }
 
 function cancelSpeechSession(reason = "cancelled", options = {}) {
+  const schedulerBeforeCancel = ttsScheduler.snapshot();
+  const interruptedRuntime = Boolean(
+    schedulerBeforeCancel.active ||
+    schedulerBeforeCancel.prefetches?.some((slot) => !slot.ready) ||
+    (schedulerBeforeCancel.prefetch?.kind === "explicit" && !schedulerBeforeCancel.prefetch.ready)
+  );
   if (!options.preservePointRequest) {
     cancelPointReadInteraction(reason, {
       pauseScroll: options.pausePointScroll !== false,
@@ -1056,6 +1090,11 @@ function cancelSpeechSession(reason = "cancelled", options = {}) {
       ttsUtteranceLocked = locked;
     },
   }, reason, options);
+  if (interruptedRuntime) {
+    ttsWarmupReadyKeys.clear();
+    ttsWarmupStatus = "idle";
+    ttsWarmupActiveKey = null;
+  }
   refreshTtsRuntimeStatus();
   publishDiagnostics();
 }
@@ -1077,18 +1116,30 @@ function enforceTtsAvailability(reason = "tts-availability") {
   syncTtsControlVisibility();
 }
 
-function warmupTtsProvider() {
-  if (!isTtsControlAllowed()) return Promise.resolve(false);
-  if (ttsWarmupStatus === "ready") return Promise.resolve(true);
-  if (ttsWarmupPromise) return ttsWarmupPromise;
+function warmupTtsProvider(request = currentTtsWarmupRequest()) {
+  if (!isTtsControlAllowed() || !request) return Promise.resolve(false);
+  if (isTtsWarmupReady(request)) {
+    ttsWarmupStatus = "ready";
+    return Promise.resolve(true);
+  }
+  if (ttsWarmupPromise) {
+    return ttsWarmupPromise.then(() => (
+      isTtsWarmupReady(request) ? true : warmupTtsProvider(request)
+    ));
+  }
   ttsWarmupStatus = "loading";
+  ttsWarmupActiveKey = request.key;
   updateTtsUi({
     ...ttsController.snapshot(),
-    behavior: "正在预热本地语音，首次约 10–20 秒",
+    behavior: "正在预热当前文字的本地语音",
   });
   ttsWarmupPromise = Promise.resolve()
-    .then(() => ttsProvider?.preload?.())
+    .then(() => ttsProvider?.preload?.({
+      text: request.text,
+      language: request.language,
+    }))
     .then(() => {
+      for (const key of request.runtimeKeys) ttsWarmupReadyKeys.add(key);
       ttsWarmupStatus = "ready";
       refreshTtsRuntimeStatus();
       return true;
@@ -1103,6 +1154,7 @@ function warmupTtsProvider() {
       throw error;
     })
     .finally(() => {
+      if (ttsWarmupActiveKey === request.key) ttsWarmupActiveKey = null;
       ttsWarmupPromise = null;
       publishDiagnostics();
     });
@@ -2033,7 +2085,7 @@ function readableChunksForPage(pageNumber) {
 }
 
 function continuousSpeechPrefetchChunks(pageNumber, policy = currentTtsPolicy()) {
-  if (policy?.tierKey !== "snow-mist") return [];
+  if (!["snow-mist", "aesthetic-walk"].includes(policy?.tierKey)) return [];
   const nextPage = pageNumber + 1;
   if (nextPage > pageCount) return [];
   return readableChunksForPage(nextPage);
@@ -2540,11 +2592,12 @@ function clearFirstPageMessageTimer() {
 
 function showError(error) {
   clearFirstPageMessageTimer();
+  clearTextSession();
   activeTraceDocument = null;
   traceCapture.setDocument(null);
   traceBook.setDocument(null);
   readyToMove = false;
-  setPlaying(false);
+  setPlaying(false, { cancelSpeech: false });
   elements.toggle.disabled = true;
   elements.loading.hidden = true;
   elements.ocrDock.hidden = true;
@@ -2553,22 +2606,26 @@ function showError(error) {
   elements.errorPanel.hidden = false;
 }
 
-function showEmptyState() {
+function showEmptyState({ clearSession = true } = {}) {
   clearFirstPageMessageTimer();
-  clearTextSession();
+  if (clearSession) clearTextSession();
   activeTraceDocument = null;
   traceCapture.setDocument(null);
   traceBook.setDocument(null);
   readyToMove = false;
   activeDocumentRecord = null;
   activeFileMeta = null;
-  setPlaying(false);
+  setPlaying(false, { cancelSpeech: false });
+  elements.pages.replaceChildren();
   elements.emptyState.hidden = false;
   elements.loading.hidden = true;
+  elements.finish.hidden = true;
+  elements.errorPanel.hidden = true;
   elements.controls.hidden = true;
   elements.ocrDock.hidden = true;
   elements.toggle.disabled = true;
   elements.documentName.textContent = "让 PDF 安静地流过眼前";
+  elements.homeButton.hidden = true;
   elements.fileButton.textContent = "选择 PDF";
   elements.pageStatus.textContent = "请选择一份 PDF";
   elements.progressBar.style.width = "0%";
@@ -2576,6 +2633,7 @@ function showEmptyState() {
   elements.topReadingTime.textContent = "";
   document.title = "夜晚的书斋";
   renderHomeEcho();
+  syncTtsControlVisibility();
 }
 
 function targetPageWidth() {
@@ -2832,7 +2890,39 @@ async function disposeActiveDocument() {
   }
 }
 
+async function returnToHome() {
+  if (returningHome) return;
+  returningHome = true;
+  try {
+    window.clearTimeout(persistTimer);
+    persistTimer = 0;
+    if (activeDocumentRecord) persistReadingRecord();
+    ++loadGeneration;
+    pendingSourceAbortController?.abort?.();
+    pendingSourceAbortController = null;
+    clearFirstPageMessageTimer();
+    clearHomeBookTakingState();
+    traceCapture.reset("returned-to-shelf");
+    traceBook.setDocument(null);
+    cancelReadingReflow("returned-to-shelf");
+    elements.homeButton.hidden = true;
+    clearTextSession();
+    await disposeActiveDocument();
+    pageCount = 0;
+    pageShells = [];
+    pageLayout = [];
+    pageTops = [];
+    elements.viewport.scrollTop = 0;
+    showEmptyState({ clearSession: false });
+    window.requestAnimationFrame(() => elements.recentBooks.focus({ preventScroll: true }));
+  } finally {
+    returningHome = false;
+  }
+}
+
 async function openPdf(sourceOrFactory, displayName, { fileMeta = null } = {}) {
+  window.clearTimeout(persistTimer);
+  persistTimer = 0;
   if (activeDocumentRecord) persistReadingRecord();
   const generation = ++loadGeneration;
   pendingSourceAbortController?.abort();
@@ -2882,6 +2972,7 @@ async function openPdf(sourceOrFactory, displayName, { fileMeta = null } = {}) {
   elements.ocrDock.hidden = true;
   elements.ocrStatus.hidden = true;
   elements.ocrStatus.textContent = "";
+  elements.homeButton.hidden = false;
   elements.fileButton.textContent = "换一份 PDF";
   elements.toggle.disabled = true;
   elements.estimateWaiting.hidden = false;
@@ -3045,6 +3136,13 @@ function updateTtsSchedulerDiagnostics(pageNumber = activeReadingPage) {
   if (!pageNumber || !readyToMove) return;
   const controllerSnapshot = ttsController.snapshot();
   scheduleContinuousSpeechOcrAhead(pageNumber, controllerSnapshot.policy);
+  const warmupRequest = currentTtsWarmupRequest(pageNumber);
+  if (warmupRequest && !isTtsWarmupReady(warmupRequest)) {
+    ensureTtsRuntimeActive("page-language-ready");
+    refreshTtsRuntimeStatus();
+    publishDiagnostics();
+    return;
+  }
   const audioSnapshot = ttsAudioPlayer.snapshot();
   const schedulerSnapshot = ttsScheduler.snapshot();
   const paragraphFlowActive = controllerSnapshot.policy.autoRead === "paragraph-lead";
@@ -3715,6 +3813,10 @@ async function openLocalFile(file) {
 
 elements.filePicker.addEventListener("change", () => {
   void openLocalFile(elements.filePicker.files?.[0]);
+});
+
+elements.homeButton.addEventListener("click", () => {
+  void returnToHome();
 });
 
 elements.filePicker.addEventListener("cancel", () => {

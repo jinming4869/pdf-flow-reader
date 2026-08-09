@@ -203,3 +203,23 @@
 - 未推送 GitHub，未创建 tag 或 release。
 
 依赖审计仍有 kokoro-js 间接 sharp/libvips 的 3 个 high advisory，无自动修复；公开发布前必须处理。详细记录见 [`stage-10-local-mac-beta/README.md`](./stage-10-local-mac-beta/README.md)。
+
+## 2026-08-09：beta.2 首轮试用修复复核
+
+产品所有者指出三点：开发 worktree 未与原主目录收敛、阅读页无法回首页、最低两档朗读加载间隙明显。复核结论：
+
+- worktree 保护了原主目录的一份未提交研究文档；核心 TTS 源码没有因分支隔离而遗漏，但此前缺少最终收敛说明；
+- 阅读页确实没有关闭当前书的生命周期操作，现已新增“书架”按钮；
+- 最低两档固定中文 warmup、单槽预取和严格计划失效共同放大了首段与段间等待。
+
+beta.2 证据：
+
+- Node 369 / 369；
+- Electron 返回书架后首页可见、controls 隐藏、canvas=0、最近阅读保留；
+- 中英文 packaged depth=2 队列均 `prefetchUsed=2`、`prefetchCompleted=2`、`failed=0`；
+- ready 音频消费延迟：中文 0.19 / 0.02ms，英文 0.12 / 0.02ms；
+- packaged main、中文、日文、英文、硬取消与 worker 重建通过；
+- beta.2 final ZIP SHA-256 为 `23b4f144b4bba314916c1712d2ba878ab33943b860a191688c12740fefc321bf`；
+- 未修改原主目录，未推送、未打 tag、未发布。
+
+自动化证明结构性等待已消除，但真实 PDF 听感仍需产品所有者复测。完整记录见 [`stage-10-local-mac-beta/BETA2.md`](./stage-10-local-mac-beta/BETA2.md)。

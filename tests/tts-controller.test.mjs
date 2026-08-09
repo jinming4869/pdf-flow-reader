@@ -193,6 +193,93 @@ test("snow-mist reads continuously and prefetches the next chunk", async () => {
   assert.equal(update.speech.tierKey, "snow-mist");
   assert.equal(update.speech.speed, 1.18);
   assert.equal(update.speech.prefetchNext, true);
+  assert.equal(update.speech.prefetchDepth, 2);
+});
+
+test("continuous speech consumes a ready nearby prefetch before the reading line reaches it", async () => {
+  const calls = [];
+  const current = chunk({ text: "Current readable chunk.", y: 0.34, chunkIndex: 0 });
+  const next = chunk({ text: "Nearby prefetched chunk.", y: 0.47, chunkIndex: 1 });
+  const keyFor = (value) => `${value.source}:${value.pageIndex}:${value.chunkIndex}`;
+  const scheduler = {
+    async update(args) {
+      calls.push(args);
+      const selected = args.preferredKey
+        ? args.chunks.find((entry) => keyFor(entry) === args.preferredKey)
+        : args.chunks[0];
+      return selected ? { chunk: selected, key: keyFor(selected) } : null;
+    },
+    cancel() {},
+    reset() {},
+    snapshot() {
+      return calls.length
+        ? { prefetch: { kind: "continuous", key: keyFor(next), ready: true } }
+        : { prefetch: null };
+    },
+  };
+  const controller = createTtsController({
+    scheduler,
+    getSpeedTier: () => "snow-mist",
+  });
+  controller.setEnabled(true);
+
+  const first = await controller.tick({
+    isPlaying: true,
+    chunks: [current, next],
+    normalizedReadingY: 0.36,
+  });
+  assert.equal(first.chunk.text, current.text);
+
+  const continued = await controller.tick({
+    isPlaying: true,
+    chunks: [current, next],
+    normalizedReadingY: 0.36,
+  });
+  assert.equal(continued.chunk.text, next.text);
+  assert.equal(calls[1].preferredKey, keyFor(next));
+});
+
+test("continuous speech never skips an immediate chunk for a farther ready prefetch", async () => {
+  const calls = [];
+  const current = chunk({ text: "Current chunk.", y: 0.34, chunkIndex: 0 });
+  const immediate = chunk({ text: "Immediate next chunk.", y: 0.43, chunkIndex: 1 });
+  const farther = chunk({ text: "Farther prefetched chunk.", y: 0.51, chunkIndex: 2 });
+  const keyFor = (value) => `${value.source}:${value.pageIndex}:${value.chunkIndex}`;
+  const scheduler = {
+    async update(args) {
+      calls.push(args);
+      const selected = args.preferredKey
+        ? args.chunks.find((entry) => keyFor(entry) === args.preferredKey)
+        : args.chunks[0];
+      return selected ? { chunk: selected, key: keyFor(selected) } : null;
+    },
+    cancel() {},
+    reset() {},
+    snapshot() {
+      return calls.length
+        ? { prefetch: { kind: "continuous", key: keyFor(farther), ready: true } }
+        : { prefetch: null };
+    },
+  };
+  const controller = createTtsController({
+    scheduler,
+    getSpeedTier: () => "snow-mist",
+  });
+  controller.setEnabled(true);
+
+  await controller.tick({
+    isPlaying: true,
+    chunks: [current, immediate, farther],
+    normalizedReadingY: 0.36,
+  });
+  const repeated = await controller.tick({
+    isPlaying: true,
+    chunks: [current, immediate, farther],
+    normalizedReadingY: 0.36,
+  });
+
+  assert.equal(repeated, null);
+  assert.equal(calls.length, 1);
 });
 
 test("snow-mist keeps the next page separate from current picking but offers it for prefetch", async () => {
@@ -240,6 +327,7 @@ test("aesthetic-walk filters notes and balanced parentheticals at 1.5x", async (
   assert.equal(update.chunks[0].text, "Main text continues.");
   assert.equal(update.speech.speed, 1.5);
   assert.equal(update.speech.prefetchNext, true);
+  assert.equal(update.speech.prefetchDepth, 2);
 });
 
 test("aesthetic-walk derives a 1.5–2.5x rate from the remaining visual window", async () => {

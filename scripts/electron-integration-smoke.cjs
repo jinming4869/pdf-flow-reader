@@ -286,6 +286,7 @@ async function run() {
         return [canvas.width, canvas.height];
       })(),
       renderedShellCount: document.querySelectorAll(".page-shell.rendered").length,
+      homeButtonVisible: getComputedStyle(document.querySelector("#homeButton")).display !== "none",
       errorHidden: document.querySelector("#errorPanel").hidden,
     }))()`, true);
     const readerCapture = await capture(restartedWindow, "electron-reader.png");
@@ -769,6 +770,30 @@ async function run() {
       true,
     );
 
+    await productWindow.webContents.executeJavaScript(
+      `document.querySelector("#homeButton").click()`,
+      true,
+    );
+    await waitFor(
+      productWindow,
+      `!document.querySelector("#emptyState").hidden && document.querySelector("#controls").hidden && document.querySelectorAll("canvas.page-canvas").length === 0`,
+    );
+    const homeNavigationProbe = await productWindow.webContents.executeJavaScript(`(() => ({
+      title: document.title,
+      emptyVisible: !document.querySelector("#emptyState").hidden,
+      controlsHidden: document.querySelector("#controls").hidden,
+      homeButtonHidden: document.querySelector("#homeButton").hidden,
+      homeButtonDisplayed: getComputedStyle(document.querySelector("#homeButton")).display !== "none",
+      canvasCount: document.querySelectorAll("canvas.page-canvas").length,
+      recentBookCount: document.querySelectorAll(".recent-book-card").length,
+    }))()`, true);
+    if (homeNavigationProbe.recentBookCount < 1) {
+      throw new Error("Returning to the shelf lost the recent reading record.");
+    }
+    if (homeNavigationProbe.homeButtonDisplayed) {
+      throw new Error("The return-to-shelf action remained visually present on the shelf.");
+    }
+
     return {
       ok: true,
       security: { contextIsolation: true, nodeIntegration: false, sandbox: true },
@@ -777,6 +802,7 @@ async function run() {
       uiTraceCapture,
       reflowProbe,
       bookTraceProbe,
+      homeNavigationProbe,
       cropProbe,
       shelf,
       restartPersistence,

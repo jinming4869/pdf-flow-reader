@@ -3,6 +3,54 @@
 // 在线：OpenAI gpt-4o-mini-tts（高质量 fallback）
 // 调试：NullTtsProvider（不发声，仅诊断）
 
+const WARMUP_HAN_RE = /\p{Script=Han}/u;
+const WARMUP_KANA_RE = /[\p{Script=Hiragana}\p{Script=Katakana}]/u;
+const WARMUP_LATIN_RE = /[A-Za-z]/u;
+const WARMUP_EXCLUDED_ROLES = new Set(["reference", "table", "formula"]);
+
+function warmupText(value, maximum = 160) {
+  const normalized = String(value ?? "").replace(/\s+/gu, " ").trim();
+  return [...normalized].slice(0, maximum).join("");
+}
+
+export function createTtsWarmupRequest(chunks = []) {
+  const candidates = chunks.filter((candidate) => (
+    warmupText(candidate?.text) &&
+    Number(candidate?.priority ?? 1) >= 0.5 &&
+    !WARMUP_EXCLUDED_ROLES.has(candidate?.role)
+  ));
+  const sourceText = candidates
+    .map((candidate) => String(candidate.text).replace(/\s+/gu, " ").trim())
+    .filter(Boolean)
+    .join(" ");
+  if (!sourceText) return null;
+
+  const hints = candidates.map(
+    (candidate) => String(candidate?.languageHint ?? "").trim().toLowerCase(),
+  );
+  const hasKana = WARMUP_KANA_RE.test(sourceText) || hints.some((hint) => hint.startsWith("ja"));
+  const hasHan = WARMUP_HAN_RE.test(sourceText) || hints.some((hint) => hint === "cjk" || hint.startsWith("zh"));
+  const hasLatin = WARMUP_LATIN_RE.test(sourceText) || hints.some((hint) => hint === "latin" || hint.startsWith("en"));
+  const runtimeKeys = [
+    ...(hasLatin ? ["english"] : []),
+    ...(hasHan || hasKana ? ["multilingual"] : []),
+  ];
+  if (!runtimeKeys.length) runtimeKeys.push("english");
+  const uniqueRuntimeKeys = [...new Set(runtimeKeys)].sort();
+  const language = hasKana ? "ja" : hasHan ? "zh" : "en";
+  const text = language === "en"
+    ? "A quiet page."
+    : language === "ja"
+      ? hasLatin ? "静かな読書 PDF。" : "静かな読書。"
+      : hasLatin ? "希声 PDF" : "希声";
+  return {
+    key: uniqueRuntimeKeys.join("+"),
+    runtimeKeys: uniqueRuntimeKeys,
+    language,
+    text,
+  };
+}
+
 export function createKokoroTtsProvider({ endpoint = "./tts/kokoro" } = {}) {
   const KOKORO_MODEL_ID = "onnx-community/Kokoro-82M-ONNX";
   const activeControllers = new Set();
@@ -55,11 +103,13 @@ export function createKokoroTtsProvider({ endpoint = "./tts/kokoro" } = {}) {
     mode: "local",
     languages: ["en", "zh", "ja"],
 
-    async preload() {
+    async preload({ text = "希声", language = "zh" } = {}) {
+      const warmText = warmupText(text) || "希声";
+      const warmLanguage = String(language ?? "zh").trim() || "zh";
       const response = await postLocalTts({
-        text: "希声",
-        language: "zh",
-        voice: "zf_xiaobei",
+        text: warmText,
+        language: warmLanguage,
+        voice: pickVoice(warmLanguage),
         speed: 1.15,
         warmup: true,
       });

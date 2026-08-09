@@ -4,6 +4,7 @@ import {
   createNullTtsProvider,
   createKokoroTtsProvider,
   createOpenAITtsProvider,
+  createTtsWarmupRequest,
   pickTtsProvider,
 } from "../tts-provider.mjs";
 
@@ -80,6 +81,79 @@ test("Kokoro provider has correct metadata", () => {
   assert.ok(p.languages.includes("en"));
   assert.ok(p.languages.includes("zh"));
   assert.ok(p.languages.includes("ja"));
+});
+
+test("warmup request follows the current readable text language", () => {
+  assert.deepEqual(createTtsWarmupRequest([{
+    text: "A quiet argument continues across the page.",
+    languageHint: "latin",
+    role: "body",
+    priority: 1,
+  }]), {
+    key: "english",
+    runtimeKeys: ["english"],
+    language: "en",
+    text: "A quiet page.",
+  });
+  assert.deepEqual(createTtsWarmupRequest([{
+    text: "这一段讨论 PDF reading 的连续性。",
+    languageHint: "mixed",
+    role: "body",
+    priority: 1,
+  }]), {
+    key: "english+multilingual",
+    runtimeKeys: ["english", "multilingual"],
+    language: "zh",
+    text: "希声 PDF",
+  });
+  assert.deepEqual(createTtsWarmupRequest([
+    {
+      text: "An English paragraph.",
+      languageHint: "latin",
+      role: "body",
+      priority: 1,
+    },
+    {
+      text: "下一页转为中文。",
+      languageHint: "cjk",
+      role: "body",
+      priority: 1,
+    },
+  ]), {
+    key: "english+multilingual",
+    runtimeKeys: ["english", "multilingual"],
+    language: "zh",
+    text: "希声 PDF",
+  });
+  assert.equal(createTtsWarmupRequest([]), null);
+});
+
+test("Kokoro provider preload warms the requested language instead of fixed Chinese", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, body: JSON.parse(options.body) });
+    return new Response(new ArrayBuffer(4), { status: 200 });
+  };
+  try {
+    const p = createKokoroTtsProvider({ endpoint: "/tts/kokoro" });
+    await p.preload({
+      text: "A quiet page.",
+      language: "en",
+    });
+    assert.deepEqual(calls, [{
+      url: "/tts/kokoro",
+      body: {
+        text: "A quiet page.",
+        language: "en",
+        voice: "af_heart",
+        speed: 1.15,
+        warmup: true,
+      },
+    }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("Kokoro provider cancel does not throw", () => {

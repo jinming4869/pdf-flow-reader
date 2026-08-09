@@ -24,6 +24,9 @@
 | R16 | 为公开发布过早扩张 Windows/CI，拖慢本机可用目标 | 中 | 阶段 14 | 阶段 0–13 先保证本机 macOS；公开发布适配单独阶段与授权 | 已关闭：macOS beta 已交付，GitHub 适配未启动 |
 | R17 | kokoro-js → transformers → sharp/libvips high advisory | 高 | 公开发布 | 评估升级、裁剪或证明不可达；不自动 audit fix | 开放：3 high、0 critical、无可用自动修复 |
 | R18 | macOS /tmp 与 /private/tmp 导致英文 worker 不注册 | 高 | 阶段 10 | argv 与 modulePath 使用 realpath 比较，并打包回归 | 已关闭：worker 回归与最终三语言 smoke 通过 |
+| R19 | 原主 4.0 工作树存在未提交修改，粗暴整合会覆盖用户资料 | 高 | 阶段 10 | 复测后先备份 diff、保留旧分支，再将原路径受控切换到 v5 | 开放：等待 beta.2 复测与切换授权 |
+| R20 | 阅读页只有换 PDF，没有返回书架的生命周期操作 | 高 | 阶段 10 | 保存位置、失效 generation、取消会话、销毁 PDF/canvas、Electron 点击 smoke | 已关闭：返回后 canvas=0 且最近书保留 |
+| R21 | 最低两档固定中文预热与单槽预取造成首段/段间卡顿 | 高 | 阶段 10 | 按语言预热、depth=2 有界队列、紧邻续播、真实 packaged 队列 smoke | 已缓解：中英 consume 0.02–0.19ms、0 failed；真实 PDF 听感待复测 |
 
 ## 风险处理规则
 

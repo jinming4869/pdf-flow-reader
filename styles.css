@@ -293,6 +293,7 @@ button,
   white-space: nowrap;
 }
 
+.home-button,
 .file-button,
 .finish button {
   border: 1px solid rgba(57, 86, 70, 0.24);
@@ -302,16 +303,26 @@ button,
   cursor: pointer;
 }
 
+.home-button,
 .file-button {
   flex: 0 0 auto;
   padding: 8px 13px;
   font-size: 12px;
 }
 
+.home-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.home-button:hover,
+.home-button:focus-visible,
 .file-button:hover,
 .finish button:hover {
   background: white;
   border-color: rgba(57, 86, 70, 0.46);
+  outline: none;
 }
 
 .viewport {

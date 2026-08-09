@@ -23,6 +23,8 @@ function createPolicy({
   speechRate = { mode: "comfortable" },
   prefetchEnabled = false,
   prefetchTarget = null,
+  prefetchDepth = 1,
+  prefetchMaxNormalizedLead = 0,
   excludedRoles = COMMON_EXCLUDED_ROLES,
   excludeAnnotations = false,
   parentheticals = "keep",
@@ -53,6 +55,8 @@ function createPolicy({
     prefetch: {
       enabled: prefetchEnabled,
       target: prefetchTarget,
+      depth: Math.max(1, Math.min(2, Math.round(Number(prefetchDepth) || 1))),
+      maxNormalizedLead: Math.max(0, Math.min(0.25, Number(prefetchMaxNormalizedLead) || 0)),
     },
     filter: {
       excludePageMargins: true,
@@ -88,6 +92,8 @@ export const HISHENG_TIER_POLICIES = Object.freeze({
     latePolicy: "skip",
     prefetchEnabled: true,
     prefetchTarget: "next-readable-chunk",
+    prefetchDepth: 2,
+    prefetchMaxNormalizedLead: 0.2,
   }),
   "aesthetic-walk": createPolicy({
     tierKey: "aesthetic-walk",
@@ -101,6 +107,8 @@ export const HISHENG_TIER_POLICIES = Object.freeze({
     speechRate: { mode: "follow-scroll", min: 1.5, max: 2.5 },
     prefetchEnabled: true,
     prefetchTarget: "next-eligible-utterance",
+    prefetchDepth: 2,
+    prefetchMaxNormalizedLead: 0.2,
     excludedRoles: [...COMMON_EXCLUDED_ROLES, "footnote", "annotation"],
     excludeAnnotations: true,
     parentheticals: "strip-balanced",

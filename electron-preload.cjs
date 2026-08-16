@@ -9,6 +9,11 @@ const channels = Object.freeze({
   readCrop: "night-study:trace-read-crop",
   saveCrop: "night-study:trace-save-crop",
   transitionTrace: "night-study:trace-transition",
+  credentialStatus: "night-study:credential-status",
+  credentialSave: "night-study:credential-save",
+  credentialLoad: "night-study:credential-load",
+  credentialRemove: "night-study:credential-remove",
+  credentialList: "night-study:credential-list",
 });
 
 function invoke(channel, payload) {
@@ -63,5 +68,23 @@ contextBridge.exposeInMainWorld("nightStudyTrace", Object.freeze({
   pathForFile(file) {
     const path = webUtils.getPathForFile(file);
     return path || null;
+  },
+}));
+
+contextBridge.exposeInMainWorld("nightStudyCredential", Object.freeze({
+  status() {
+    return invoke(channels.credentialStatus);
+  },
+  save(id, secret) {
+    return invoke(channels.credentialSave, { id, secret });
+  },
+  load(id) {
+    return invoke(channels.credentialLoad, { id });
+  },
+  remove(id) {
+    return invoke(channels.credentialRemove, { id });
+  },
+  list() {
+    return invoke(channels.credentialList);
   },
 }));

@@ -68,6 +68,27 @@ test("provider config uses local unless API key and consent exist", () => {
   );
 });
 
+test("provider config prefers an injected system credential over the legacy field", () => {
+  const preferences = {
+    ttsProviderMode: "api",
+    openaiTtsApiKey: "sk-legacy",
+    openaiTtsConsentGiven: true,
+  };
+  assert.equal(
+    ttsProviderConfigFromPreferences(preferences, { credentialApiKey: "sk-keychain" }).openaiApiKey,
+    "sk-keychain",
+  );
+  // 凭据不可用时注入 null，旧字段不再被使用。
+  assert.equal(
+    ttsProviderConfigFromPreferences(preferences, { credentialApiKey: null }).openaiApiKey,
+    null,
+  );
+  assert.equal(
+    ttsProviderConfigFromPreferences(preferences, { credentialApiKey: "" }).openaiApiKey,
+    null,
+  );
+});
+
 test("updateTtsPreferences preserves local state and stores only the boolean master", () => {
   const state = {
     documents: {},

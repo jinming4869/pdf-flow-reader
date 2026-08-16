@@ -281,7 +281,86 @@ let homeBookWheelLocked = false;
 let returningHome = false;
 let persistTimer = 0;
 let restoreMessageTimer = 0;
-const ttsProvider = pickTtsProvider(ttsProviderConfigFromPreferences(localState.preferences));
+let activeCredentialApiKey = null;
+let credentialBridgeState = { available: false, reason: "uninitialized" };
+
+function createSwitchableTtsProvider(initialConfig) {
+  let current = pickTtsProvider(initialConfig);
+  return {
+    setConfig(nextConfig) {
+      current = pickTtsProvider(nextConfig);
+    },
+    synthesize(args) {
+      return current.synthesize(args);
+    },
+    cancel() {
+      return current.cancel?.();
+    },
+    get id() {
+      return current.id;
+    },
+    get name() {
+      return current.name;
+    },
+    get mode() {
+      return current.mode;
+    },
+  };
+}
+
+function refreshTtsProviderFromCredentials() {
+  switchableTtsProvider.setConfig(ttsProviderConfigFromPreferences(
+    localState.preferences,
+    { credentialApiKey: activeCredentialApiKey },
+  ));
+}
+
+async function initializeCredentialBridge() {
+  const bridge = window.nightStudyCredential;
+  if (!bridge?.status) {
+    credentialBridgeState = { available: false, reason: "no-bridge" };
+    refreshTtsProviderFromCredentials();
+    return;
+  }
+  try {
+    const status = await bridge.status();
+    if (!status?.ok || !status.available) {
+      credentialBridgeState = {
+        available: false,
+        reason: status?.error?.reason ?? "safe-storage-unavailable",
+      };
+      refreshTtsProviderFromCredentials();
+      return;
+    }
+    credentialBridgeState = { available: true, reason: null };
+    const legacy = typeof localState.preferences.openaiTtsApiKey === "string"
+      ? localState.preferences.openaiTtsApiKey
+      : "";
+    if (legacy) {
+      const saved = await bridge.save("openai-tts", legacy);
+      if (saved?.ok) {
+        localState = writeLocalState({
+          ...localState,
+          preferences: {
+            ...localState.preferences,
+            openaiTtsApiKey: "",
+          },
+        });
+      }
+    }
+    const loaded = await bridge.load("openai-tts");
+    if (loaded?.ok && typeof loaded.secret === "string" && loaded.secret) {
+      activeCredentialApiKey = loaded.secret;
+    }
+  } catch {
+    credentialBridgeState = { available: false, reason: "bridge-error" };
+  }
+  refreshTtsProviderFromCredentials();
+}
+
+const switchableTtsProvider = createSwitchableTtsProvider(
+  ttsProviderConfigFromPreferences(localState.preferences),
+);
 let ttsWarmupPromise = null;
 let ttsWarmupStatus = "idle";
 let ttsWarmupActiveKey = null;
@@ -313,7 +392,7 @@ const ttsAudioPlayer = createTtsAudioPlayer({
   },
 });
 const ttsScheduler = createTtsScheduler({
-  provider: ttsProvider,
+  provider: switchableTtsProvider,
   onPick: ({ pick }) => {
     ttsUtteranceLocked = true;
     if (pick?.chunk?.pointReadRequestId) {
@@ -512,6 +591,10 @@ function collectDiagnosticsSnapshot() {
         : null,
     },
     readableChunks: collectReadableChunkDiagnostics(),
+    credential: {
+      bridge: credentialBridgeState,
+      hasApiKey: Boolean(activeCredentialApiKey),
+    },
     tts: {
       controller: ttsController.snapshot(),
       scheduler: ttsScheduler.snapshot(),
@@ -4048,6 +4131,7 @@ setInterval(() => {
 applyPatternMode();
 updateSpeedPresentation("initial");
 requestAnimationFrame(animate);
+void initializeCredentialBridge();
 
 try {
   const configResponse = await fetch("./config.json", { cache: "no-store" });

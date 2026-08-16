@@ -19,10 +19,10 @@
 
 ### S1：系统凭据 PoC
 
-- [ ] Electron `safeStorage` 打包读写实测（macOS Keychain）
-- [ ] 未签名 / 签名两种包的失败路径
-- [ ] renderer 窄 IPC 暴露，凭据不落日志
-- [ ] 删除明文 API 字段并加扫描测试
+- [x] Electron `safeStorage` 打包读写实测（macOS Keychain）
+- [x] 未签名 / 签名两种包的失败路径
+- [x] renderer 窄 IPC 暴露，凭据不落日志
+- [x] 删除明文 API 字段并加扫描测试
 
 ### S2：TraceEchoProvider PoC
 

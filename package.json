@@ -33,6 +33,8 @@
     "files": [
       "electron-main.mjs",
       "electron-preload.cjs",
+      "credential-store.mjs",
+      "credential-ipc.mjs",
       "trace-ipc.mjs",
       "trace-repository.mjs",
       "server.mjs",

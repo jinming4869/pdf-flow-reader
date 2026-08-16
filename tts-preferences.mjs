@@ -33,12 +33,25 @@ export function normalizeTtsPreferences(preferences = {}) {
   return next;
 }
 
-export function ttsProviderConfigFromPreferences(preferences = {}) {
+export function ttsProviderConfigFromPreferences(preferences = {}, options = {}) {
   const p = normalizeTtsPreferences(preferences);
-  const canUseApi = p.ttsProviderMode === "api" && p.openaiTtsConsentGiven && Boolean(p.openaiTtsApiKey);
+  // 显式注入系统凭据时不再回退旧明文字段；未注入（浏览器调试等）才兼容旧字段。
+  const hasCredentialInjection = Boolean(
+    options &&
+    typeof options === "object" &&
+    Object.prototype.hasOwnProperty.call(options, "credentialApiKey")
+  );
+  const resolvedApiKey = hasCredentialInjection
+    ? (
+        typeof options.credentialApiKey === "string" && options.credentialApiKey
+          ? options.credentialApiKey
+          : null
+      )
+    : p.openaiTtsApiKey;
+  const canUseApi = p.ttsProviderMode === "api" && p.openaiTtsConsentGiven && Boolean(resolvedApiKey);
   return {
     kokoroEnabled: p.ttsProviderMode !== "api" || !canUseApi,
-    openaiApiKey: canUseApi ? p.openaiTtsApiKey : null,
+    openaiApiKey: canUseApi ? resolvedApiKey : null,
     openaiVoice: p.openaiTtsVoice,
   };
 }

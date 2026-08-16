@@ -70,6 +70,8 @@ function sanitizeState(value, now = new Date()) {
   delete preferences.ttsMode;
   delete preferences.ttsPreferredMode;
   delete preferences.ttsConsentGiven;
+  // 凭据已迁移到系统安全存储；localStorage 不再保留任何明文密钥。
+  if (!preferences.openaiTtsApiKey) delete preferences.openaiTtsApiKey;
   preferences.defaultSpeedPxPerSecond = Math.max(
     4,
     Math.min(64, Math.round(sanitizeNumber(preferences.defaultSpeedPxPerSecond, 16))),

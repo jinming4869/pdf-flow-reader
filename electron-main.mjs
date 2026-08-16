@@ -1,11 +1,13 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, shell } from "electron";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createReaderServer } from "./server.mjs";
 import { registerTraceIpc } from "./trace-ipc.mjs";
 import { createTraceRepository } from "./trace-repository.mjs";
+import { createCredentialStore } from "./credential-store.mjs";
+import { registerCredentialIpc } from "./credential-ipc.mjs";
 
 const appRoot = dirname(fileURLToPath(import.meta.url));
 const applicationName = "夜晚的书斋";
@@ -27,6 +29,8 @@ let activeIconMode = null;
 let iconTimer = null;
 let traceRepository = null;
 let disposeTraceIpc = null;
+let credentialStore = null;
+let disposeCredentialIpc = null;
 let pendingPdfPath = findPdfArgument(process.argv.slice(1));
 
 process.on("unhandledRejection", (reason) => {
@@ -142,6 +146,67 @@ async function initializeTraceInfrastructure() {
     disposeTraceIpc?.();
     disposeTraceIpc = null;
     console.error("航迹本地仓库暂不可用，基础阅读仍可继续：", error);
+    return false;
+  }
+}
+
+async function initializeCredentialInfrastructure() {
+  try {
+    const { safeStorage } = await import("electron");
+    credentialStore = createCredentialStore({
+      filePath: join(app.getPath("userData"), "credentials.json"),
+      safeStorage,
+    });
+    const availability = credentialStore.status();
+    if (!availability.available) {
+      console.info("系统凭据存储不可用，AI 功能将保持禁用。");
+    }
+    disposeCredentialIpc = registerCredentialIpc({ ipcMain, store: credentialStore });
+    return availability.available;
+  } catch (error) {
+    credentialStore = null;
+    disposeCredentialIpc?.();
+    disposeCredentialIpc = null;
+    console.error("系统凭据暂不可用，AI 功能将保持禁用：", error);
+    return false;
+  }
+}
+
+async function runCredentialSelfCheck() {
+  try {
+    const marker = "night-study-credential-smoke-secret";
+    const status = credentialStore?.status?.() ?? { available: false };
+    const result = { status };
+    if (status.available) {
+      await credentialStore.save("smoke-credential", marker);
+      result.roundTrip = (await credentialStore.load("smoke-credential")) === marker;
+      await credentialStore.remove("smoke-credential");
+      result.remaining = await credentialStore.list();
+    }
+    const credentialFile = join(app.getPath("userData"), "credentials.json");
+    try {
+      result.onDiskLeak = readFileSync(credentialFile, "utf8").includes(marker);
+    } catch {
+      result.onDiskLeak = false;
+    }
+    result.passed = Boolean(
+      status.available && result.roundTrip === true && result.onDiskLeak === false
+    );
+    console.log(`CREDENTIAL_SELF_CHECK ${JSON.stringify(result)}`);
+    try {
+      writeFileSync(
+        join(app.getPath("temp"), "night-study-credential-check.json"),
+        JSON.stringify(result),
+        "utf8",
+      );
+    } catch {
+      // 诊断文件写入失败不影响自检结论。
+    }
+    setTimeout(() => app.exit(result.passed ? 0 : 1), 0);
+    return true;
+  } catch (error) {
+    console.error(`CREDENTIAL_SELF_CHECK_FAILED ${error?.message ?? error}`);
+    setTimeout(() => app.exit(1), 0);
     return false;
   }
 }
@@ -268,10 +333,35 @@ app.on("open-file", (event, filePath) => {
   }
 });
 
+function writeBootProbe(stage, detail = null) {
+  if (process.env.NIGHT_STUDY_CREDENTIAL_SMOKE !== "1") return;
+  try {
+    writeFileSync(
+      join(app.getPath("temp"), "night-study-boot-probe.json"),
+      JSON.stringify({ stage, detail, at: Date.now() }),
+      "utf8",
+    );
+  } catch {
+    // 探针写入失败不影响启动。
+  }
+}
+
+writeBootProbe("module-loaded");
+
 app.whenReady().then(async () => {
+  writeBootProbe("ready");
   installApplicationMenu();
+  writeBootProbe("menu");
   startIconSchedule();
+  writeBootProbe("icon");
   await initializeTraceInfrastructure();
+  writeBootProbe("trace");
+  await initializeCredentialInfrastructure();
+  writeBootProbe("credential", credentialStore?.status() ?? null);
+  if (process.env.NIGHT_STUDY_CREDENTIAL_SMOKE === "1") {
+    await runCredentialSelfCheck();
+    return;
+  }
   await createMainWindow();
 
   app.on("activate", async () => {
@@ -289,6 +379,9 @@ app.on("before-quit", () => {
   disposeTraceIpc?.();
   disposeTraceIpc = null;
   traceRepository = null;
+  disposeCredentialIpc?.();
+  disposeCredentialIpc = null;
+  credentialStore = null;
   if (iconTimer) {
     clearInterval(iconTimer);
     iconTimer = null;

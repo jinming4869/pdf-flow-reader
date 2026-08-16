@@ -53,3 +53,20 @@
 - Electron smoke：设置目的地 → 导出（md + png 落盘）→ 重复导出 skipped → 入队 → 状态快照 → 清空目的地，全部通过。
 
 残余：Obsidian 真实 vault 写入与书架选择目录 UI（dialog）留待 S4/S5 产品形态验收。
+
+## 2026-08-16：S4 Prompt 分层与界面复核
+
+结论：内置只读版本化 Prompt、用户副本分层、回声／归档面板、复述自动生成链路与目录选择对话框完成。
+
+关键证据：
+
+- Node 回归 423 / 423（prompt-templates 6 项）；
+- Prompt：内置 v1 只读；用户副本独立保存、升级不覆盖；解析结果带 source 与 stale 标记；存储不含密钥形状；
+- 单书航迹面板新增“回声／归档”入口与“一句复述”详情区块（pending / done / failed 三态 + 手动重试）；
+- 套索保存进入复核时异步生成复述（裁图缺失自动纯文字），不阻塞回流；
+- 配置面板：baseURL / 模型 / 视觉开关存偏好，密钥只进 safeStorage（“echo-fast”槽位）；未配置时安静说明，离线核心不受影响；
+- 归档面板：文件夹与 Obsidian 目录选择（dialog）、当前目的地、重新导出全部（新增/跳过计数）、清除目的地；
+- Electron UI smoke：PDF 加载、入口点击、面板开关、未配置状态、配置保存、归档状态读取全部通过；
+- 修复两处打包/服务缺陷：server 静态模块白名单补齐三个新 renderer 模块；echo-client 改用浏览器安全 base64（原 Buffer 在 renderer 不存在）。
+
+S4 完成，v5.1 功能面闭环；进入 S5 打包与全量验收。

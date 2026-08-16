@@ -84,6 +84,7 @@ export function createTraceCaptureController({
   onPause = () => {},
   onCancelSpeech = () => {},
   onReturnToFlow = () => {},
+  onTraceSaved = () => {},
   createId = defaultTraceId,
 } = {}) {
   const button = requiredElement(elements?.button, "button");
@@ -198,6 +199,7 @@ export function createTraceCaptureController({
     clearLassoLayer();
     panel.dataset.traceId = traceId;
     panel.dataset.documentId = documentRecord?.id ?? "";
+    if (latestTrace) onTraceSaved(latestTrace);
   }
 
   function showSaveError(errorCode) {

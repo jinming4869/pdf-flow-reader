@@ -20,6 +20,7 @@ const channels = Object.freeze({
   archiveExportTrace: "night-study:archive-export-trace",
   archiveEnqueue: "night-study:archive-enqueue",
   archiveRetryFailed: "night-study:archive-retry-failed",
+  archiveChooseDirectory: "night-study:archive-choose-directory",
 });
 
 function invoke(channel, payload) {
@@ -113,5 +114,8 @@ contextBridge.exposeInMainWorld("nightStudyArchive", Object.freeze({
   },
   retryFailed() {
     return invoke(channels.archiveRetryFailed);
+  },
+  chooseDirectory() {
+    return invoke(channels.archiveChooseDirectory);
   },
 }));

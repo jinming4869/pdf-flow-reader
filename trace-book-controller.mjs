@@ -39,6 +39,7 @@ export function createTraceBookController({
   traceClient,
   onOpen = () => {},
   onJump = () => {},
+  onSelect = () => {},
 } = {}) {
   const openButton = required(elements?.openButton, "openButton");
   const panel = required(elements?.panel, "panel");
@@ -182,6 +183,7 @@ export function createTraceBookController({
     if (!trace) return false;
     selected = trace;
     renderList();
+    onSelect(trace);
     const coordinate = trace.emotion.current;
     const original = trace.emotion.original;
     meta.textContent = [

@@ -9,6 +9,7 @@ export const ARCHIVE_IPC_CHANNELS = Object.freeze({
   exportTrace: "night-study:archive-export-trace",
   enqueue: "night-study:archive-enqueue",
   retryFailed: "night-study:archive-retry-failed",
+  chooseDirectory: "night-study:archive-choose-directory",
 });
 
 function payloadObject(value) {
@@ -48,7 +49,7 @@ function handle(handler) {
   };
 }
 
-export function registerArchiveIpc({ ipcMain, repository } = {}) {
+export function registerArchiveIpc({ ipcMain, repository, dialog = null } = {}) {
   if (!ipcMain?.handle || !ipcMain?.removeHandler) {
     throw new TypeError("registerArchiveIpc 需要 ipcMain.handle/removeHandler。");
   }
@@ -91,6 +92,21 @@ export function registerArchiveIpc({ ipcMain, repository } = {}) {
     [ARCHIVE_IPC_CHANNELS.retryFailed, handle(async () => (
       repository.retryFailed()
     ))],
+    [ARCHIVE_IPC_CHANNELS.chooseDirectory, handle(async () => {
+      if (!dialog?.showOpenDialog) {
+        const error = new Error("目录选择对话框不可用。");
+        error.code = "ARCHIVE_DIALOG_UNAVAILABLE";
+        throw error;
+      }
+      const result = await dialog.showOpenDialog({
+        title: "选择归档目录",
+        properties: ["openDirectory", "createDirectory"],
+      });
+      if (result.canceled || !Array.isArray(result.filePaths) || !result.filePaths.length) {
+        return { canceled: true, path: null };
+      }
+      return { canceled: false, path: result.filePaths[0] };
+    })],
   ]);
 
   for (const [channel, handler] of handlers) {

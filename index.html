@@ -214,6 +214,7 @@
           <h2 id="bookTraceTitle">一本书的航迹</h2>
         </div>
         <div class="book-trace-header-actions">
+          <button id="bookTraceEchoArchive" type="button">回声／归档</button>
           <button id="bookTraceTrashView" type="button" aria-pressed="false">回收站</button>
           <button id="bookTraceClose" type="button" aria-label="关闭单书航迹">×</button>
         </div>
@@ -238,6 +239,11 @@
             <button id="bookTraceJump" type="button" disabled>回到原页</button>
             <button id="bookTraceTrash" type="button" disabled>移入回收站</button>
           </div>
+          <div id="bookTraceEcho" class="book-trace-echo" hidden>
+            <strong>一句复述</strong>
+            <p id="bookTraceEchoText" role="status">尚未生成。</p>
+            <button id="bookTraceEchoRetry" type="button" hidden>重试生成</button>
+          </div>
         </aside>
       </div>
     </section>
@@ -259,6 +265,47 @@
       </div>
       <pre id="ttsDiagnosticsOutput">按 D 打开或刷新希声诊断。</pre>
       <button id="ttsDiagnosticsSelfTest" type="button">本地语音自检</button>
+    </aside>
+
+    <aside id="echoArchivePanel" class="echo-archive-panel" role="dialog" aria-modal="true" aria-label="回声与归档" hidden>
+      <div class="echo-archive-heading">
+        <strong>回声与归档</strong>
+        <button id="echoArchiveClose" type="button" aria-label="关闭回声与归档">×</button>
+      </div>
+      <section class="echo-archive-section">
+        <h3>回声配置</h3>
+        <p id="echoAiStatus" class="echo-ai-status" role="status">正在检查凭据状态…</p>
+        <label class="echo-field">服务地址
+          <input id="echoBaseUrlInput" type="text" placeholder="https://api.deepseek.com" autocomplete="off">
+        </label>
+        <label class="echo-field">模型
+          <input id="echoModelInput" type="text" placeholder="deepseek-chat" autocomplete="off">
+        </label>
+        <label class="echo-field">API 密钥（保存到系统安全存储）
+          <input id="echoApiKeyInput" type="password" placeholder="sk-…" autocomplete="off">
+        </label>
+        <label class="echo-check">
+          <input id="echoVisionInput" type="checkbox"> 模型支持视觉（裁图随文字发送）
+        </label>
+        <div class="echo-archive-actions">
+          <button id="echoSaveConfig" type="button">保存配置</button>
+          <button id="echoClearKey" type="button">清除密钥</button>
+        </div>
+        <p class="echo-note">未配置时离线核心完整可用；配置后套索保存会异步生成一句复述，不阻塞阅读。</p>
+      </section>
+      <section class="echo-archive-section">
+        <h3>归档</h3>
+        <p id="archiveStatus" class="echo-ai-status" role="status">未配置目的地。</p>
+        <div class="echo-archive-actions">
+          <button id="archiveChooseFolder" type="button">选择文件夹</button>
+          <button id="archiveChooseObsidian" type="button">选择 Obsidian 目录</button>
+        </div>
+        <div class="echo-archive-actions">
+          <button id="archiveExportAll" type="button" disabled>重新导出全部</button>
+          <button id="archiveClear" type="button" disabled>清除目的地</button>
+        </div>
+        <p class="echo-note">导出只新增文件，不删除或改写旧内容；重试最多三次，失败可在书架看到。</p>
+      </section>
     </aside>
 
     <div id="errorPanel" class="error-panel" role="alert" hidden>

@@ -45,6 +45,18 @@ function normalizeOutput(raw) {
   return flattened;
 }
 
+function bytesToBase64(bytes) {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode.apply(
+      null,
+      bytes.subarray(index, index + chunkSize),
+    );
+  }
+  return btoa(binary);
+}
+
 function buildVisionPayload({ systemText, userText, imageBytes, imageMimeType }) {
   return {
     model: null, // filled by caller
@@ -57,7 +69,7 @@ function buildVisionPayload({ systemText, userText, imageBytes, imageMimeType })
           {
             type: "image_url",
             image_url: {
-              url: `data:${imageMimeType};base64,${Buffer.from(imageBytes).toString("base64")}`,
+              url: `data:${imageMimeType};base64,${bytesToBase64(imageBytes)}`,
             },
           },
         ],

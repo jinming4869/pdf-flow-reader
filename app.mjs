@@ -99,6 +99,15 @@ import {
   upsertRhythmRecord,
   writeLocalState,
 } from "./storage.mjs";
+import { createEchoClient, EchoRequestError } from "./echo-client.mjs";
+import {
+  readEchoState,
+  recordEchoFailure,
+  recordEchoPending,
+  recordEchoSuccess,
+  writeEchoState,
+} from "./echo-state.mjs";
+import { resolvePrompt } from "./prompt-templates.mjs";
 import {
   cacheBudgetForDeviceMemory,
   RenderScheduler,
@@ -189,6 +198,24 @@ const elements = {
   ttsDiagnosticsOutput: document.querySelector("#ttsDiagnosticsOutput"),
   ttsDiagnosticsClose: document.querySelector("#ttsDiagnosticsClose"),
   ttsDiagnosticsSelfTest: document.querySelector("#ttsDiagnosticsSelfTest"),
+  bookTraceEchoArchive: document.querySelector("#bookTraceEchoArchive"),
+  bookTraceEcho: document.querySelector("#bookTraceEcho"),
+  bookTraceEchoText: document.querySelector("#bookTraceEchoText"),
+  bookTraceEchoRetry: document.querySelector("#bookTraceEchoRetry"),
+  echoArchivePanel: document.querySelector("#echoArchivePanel"),
+  echoArchiveClose: document.querySelector("#echoArchiveClose"),
+  echoAiStatus: document.querySelector("#echoAiStatus"),
+  echoBaseUrlInput: document.querySelector("#echoBaseUrlInput"),
+  echoModelInput: document.querySelector("#echoModelInput"),
+  echoApiKeyInput: document.querySelector("#echoApiKeyInput"),
+  echoVisionInput: document.querySelector("#echoVisionInput"),
+  echoSaveConfig: document.querySelector("#echoSaveConfig"),
+  echoClearKey: document.querySelector("#echoClearKey"),
+  archiveStatus: document.querySelector("#archiveStatus"),
+  archiveChooseFolder: document.querySelector("#archiveChooseFolder"),
+  archiveChooseObsidian: document.querySelector("#archiveChooseObsidian"),
+  archiveExportAll: document.querySelector("#archiveExportAll"),
+  archiveClear: document.querySelector("#archiveClear"),
   errorPanel: document.querySelector("#errorPanel"),
   errorText: document.querySelector("#errorText"),
 };
@@ -281,7 +308,8 @@ let homeBookWheelLocked = false;
 let returningHome = false;
 let persistTimer = 0;
 let restoreMessageTimer = 0;
-let activeCredentialApiKey = null;
+let activeTtsCredentialApiKey = null;
+let activeEchoApiKey = null;
 let credentialBridgeState = { available: false, reason: "uninitialized" };
 
 function createSwitchableTtsProvider(initialConfig) {
@@ -311,7 +339,7 @@ function createSwitchableTtsProvider(initialConfig) {
 function refreshTtsProviderFromCredentials() {
   switchableTtsProvider.setConfig(ttsProviderConfigFromPreferences(
     localState.preferences,
-    { credentialApiKey: activeCredentialApiKey },
+    { credentialApiKey: activeTtsCredentialApiKey },
   ));
 }
 
@@ -350,7 +378,12 @@ async function initializeCredentialBridge() {
     }
     const loaded = await bridge.load("openai-tts");
     if (loaded?.ok && typeof loaded.secret === "string" && loaded.secret) {
-      activeCredentialApiKey = loaded.secret;
+      activeTtsCredentialApiKey = loaded.secret;
+    }
+    const loadedEcho = await bridge.load("echo-fast");
+    if (loadedEcho?.ok && typeof loadedEcho.secret === "string" && loadedEcho.secret) {
+      activeEchoApiKey = loadedEcho.secret;
+      rebuildEchoClient();
     }
   } catch {
     credentialBridgeState = { available: false, reason: "bridge-error" };
@@ -503,6 +536,9 @@ const traceCapture = createTraceCaptureController({
       interruptionMs,
     });
   },
+  onTraceSaved: (trace) => {
+    void scheduleEchoForTrace(trace);
+  },
 });
 
 const traceBook = createTraceBookController({
@@ -525,7 +561,290 @@ const traceBook = createTraceBookController({
   traceClient,
   onOpen: () => setPlaying(false),
   onJump: jumpToTracePage,
+  onSelect: (trace) => {
+    renderEchoForSelectedTrace(trace);
+  },
 });
+
+// ———— v5.1 回声与归档 ————
+
+let echoState = readEchoState();
+let echoClient = null;
+let echoGeneration = 0;
+let activeTraceEchoId = null;
+
+const ECHO_PREFERENCES_DEFAULTS = Object.freeze({
+  echoBaseUrl: "https://api.deepseek.com",
+  echoModel: "deepseek-chat",
+  echoVision: false,
+});
+
+function echoPreferences() {
+  return {
+    ...ECHO_PREFERENCES_DEFAULTS,
+    echoBaseUrl: typeof localState.preferences.echoBaseUrl === "string" && localState.preferences.echoBaseUrl
+      ? localState.preferences.echoBaseUrl
+      : ECHO_PREFERENCES_DEFAULTS.echoBaseUrl,
+    echoModel: typeof localState.preferences.echoModel === "string" && localState.preferences.echoModel
+      ? localState.preferences.echoModel
+      : ECHO_PREFERENCES_DEFAULTS.echoModel,
+    echoVision: Boolean(localState.preferences.echoVision),
+  };
+}
+
+function rebuildEchoClient() {
+  const preferences = echoPreferences();
+  if (!activeEchoApiKey) {
+    echoClient = null;
+    return;
+  }
+  try {
+    const prompt = resolvePrompt("echo");
+    echoClient = createEchoClient({
+      apiKey: activeEchoApiKey,
+      baseUrl: preferences.echoBaseUrl,
+      model: preferences.echoModel,
+      vision: preferences.echoVision,
+      systemText: prompt.text,
+    });
+  } catch (error) {
+    echoClient = null;
+    console.error("回声客户端初始化失败：", error?.message ?? error);
+  }
+}
+
+function echoClientStatusText() {
+  if (!activeEchoApiKey) return "未配置 API 密钥；离线核心完整可用，配置后套索保存会自动生成一句复述。";
+  if (credentialBridgeState.available !== true) return "系统凭据存储不可用，AI 功能保持禁用。";
+  const preferences = echoPreferences();
+  return `已配置：${preferences.echoBaseUrl} · ${preferences.echoModel}${preferences.echoVision ? " · 视觉" : " · 纯文字"}`;
+}
+
+function updateEchoUi() {
+  if (!elements.echoAiStatus) return;
+  elements.echoAiStatus.textContent = echoClientStatusText();
+  const preferences = echoPreferences();
+  elements.echoBaseUrlInput.value = preferences.echoBaseUrl;
+  elements.echoModelInput.value = preferences.echoModel;
+  elements.echoVisionInput.checked = preferences.echoVision;
+  elements.echoApiKeyInput.value = "";
+}
+
+async function scheduleEchoForTrace(trace) {
+  if (!trace?.id || !trace.source?.text?.trim()) return;
+  if (!echoClient) {
+    echoState = writeEchoState(recordEchoFailure(echoState, trace.id, "echo-unconfigured"));
+    return;
+  }
+  const existing = echoState.records?.[trace.id];
+  if (existing?.status === "done" || existing?.status === "pending") return;
+  const generation = ++echoGeneration;
+  echoState = writeEchoState(recordEchoPending(echoState, trace.id));
+  try {
+    let cropBytes = null;
+    let cropMimeType = "image/png";
+    if (trace.crop?.state === "ready" && activeTraceDocument) {
+      try {
+        const crop = await traceClient.readCrop(activeTraceDocument.id, trace.id);
+        if (crop?.bytes) {
+          cropBytes = crop.bytes;
+          cropMimeType = crop.mimeType ?? cropMimeType;
+        }
+      } catch {
+        // 裁图读取失败不影响文字路径。
+      }
+    }
+    const result = await echoClient.generateEcho({
+      text: trace.source.text,
+      imageBytes: cropBytes,
+      imageMimeType: cropMimeType,
+    });
+    if (generation !== echoGeneration) return;
+    echoState = writeEchoState(recordEchoSuccess(echoState, trace.id, {
+      text: result.text,
+      mode: result.mode,
+      model: result.model,
+      latencyMs: result.latencyMs,
+    }));
+    if (activeTraceEchoId === trace.id) renderEchoForSelectedTrace(trace);
+  } catch (error) {
+    if (generation !== echoGeneration) return;
+    const reason = error instanceof EchoRequestError ? error.code : "echo-failed";
+    echoState = writeEchoState(recordEchoFailure(echoState, trace.id, reason));
+    if (activeTraceEchoId === trace.id) renderEchoForSelectedTrace(trace);
+  }
+}
+
+function renderEchoForSelectedTrace(trace) {
+  activeTraceEchoId = trace?.id ?? null;
+  if (!trace || !elements.bookTraceEcho) {
+    if (elements.bookTraceEcho) elements.bookTraceEcho.hidden = true;
+    return;
+  }
+  elements.bookTraceEcho.hidden = false;
+  const record = echoState.records?.[trace.id];
+  const retryButton = elements.bookTraceEchoRetry;
+  retryButton.hidden = true;
+  if (!record) {
+    elements.bookTraceEchoText.textContent = echoClient
+      ? "尚未生成；保存新痕迹时自动生成。"
+      : "未配置 AI；在“回声／归档”里配置后可为这条痕迹生成复述。";
+  } else if (record.status === "pending") {
+    elements.bookTraceEchoText.textContent = "正在生成一句复述…";
+  } else if (record.status === "done") {
+    elements.bookTraceEchoText.textContent = record.text;
+  } else {
+    elements.bookTraceEchoText.textContent = `生成失败（${record.reason ?? "未知原因"}）。`;
+    retryButton.hidden = false;
+    retryButton.onclick = () => {
+      const nextRecords = { ...echoState.records };
+      delete nextRecords[trace.id];
+      echoState = writeEchoState({ ...echoState, records: nextRecords });
+      void scheduleEchoForTrace(trace);
+    };
+  }
+}
+
+function openEchoArchivePanel() {
+  updateEchoUi();
+  void refreshArchiveUi();
+  elements.echoArchivePanel.hidden = false;
+}
+
+function closeEchoArchivePanel() {
+  elements.echoArchivePanel.hidden = true;
+}
+
+async function refreshArchiveUi() {
+  const bridge = window.nightStudyArchive;
+  if (!bridge?.status) {
+    elements.archiveStatus.textContent = "归档需要桌面版（Electron）环境。";
+    return;
+  }
+  try {
+    const status = await bridge.status();
+    if (!status?.ok) {
+      elements.archiveStatus.textContent = "归档状态读取失败。";
+      return;
+    }
+    const destination = status.destination;
+    if (!destination) {
+      elements.archiveStatus.textContent = "未配置目的地。";
+      elements.archiveExportAll.disabled = true;
+      elements.archiveClear.disabled = true;
+    } else {
+      const typeLabel = destination.type === "obsidian" ? "Obsidian" : "文件夹";
+      elements.archiveStatus.textContent = `${typeLabel}目的地：${destination.path}`;
+      elements.archiveExportAll.disabled = false;
+      elements.archiveClear.disabled = false;
+    }
+    const failed = status.queue?.failed?.length ?? 0;
+    if (failed > 0) {
+      elements.archiveStatus.textContent += `；${failed} 条导出失败可重试。`;
+    }
+  } catch {
+    elements.archiveStatus.textContent = "归档状态读取失败。";
+  }
+}
+
+async function chooseArchiveDestination(type) {
+  const bridge = window.nightStudyArchive;
+  if (!bridge?.chooseDirectory) return;
+  const result = await bridge.chooseDirectory();
+  if (!result?.ok || result.canceled || !result.path) return;
+  await bridge.setDestination(type, result.path);
+  await refreshArchiveUi();
+}
+
+async function exportAllTracesForBook() {
+  const bridge = window.nightStudyArchive;
+  if (!bridge?.exportTrace || !activeTraceDocument) return;
+  const traces = await traceClient.listTraces(activeTraceDocument.id, { includeTrashed: false });
+  let written = 0;
+  let skipped = 0;
+  for (const trace of traces) {
+    let cropBytes = null;
+    if (trace.crop?.state === "ready") {
+      try {
+        const crop = await traceClient.readCrop(activeTraceDocument.id, trace.id);
+        if (crop?.bytes) cropBytes = crop.bytes;
+      } catch {
+        // 裁图缺失时仍导出文字与坐标。
+      }
+    }
+    const echoText = echoState.records?.[trace.id]?.status === "done"
+      ? echoState.records[trace.id].text
+      : "";
+    const result = await bridge.exportTrace({
+      trace,
+      documentName: activeTraceDocument.fileName ?? "",
+      echoText,
+      cropBytes,
+    });
+    if (result?.ok && result.status === "written") written += 1;
+    if (result?.ok && result.status === "skipped") skipped += 1;
+  }
+  elements.archiveStatus.textContent = `导出完成：新增 ${written} 条，跳过 ${skipped} 条。`;
+}
+
+function bindEchoArchiveControls() {
+  elements.bookTraceEchoArchive?.addEventListener("click", openEchoArchivePanel);
+  elements.echoArchiveClose?.addEventListener("click", closeEchoArchivePanel);
+  elements.echoSaveConfig?.addEventListener("click", async () => {
+    const baseUrl = elements.echoBaseUrlInput.value.trim();
+    const model = elements.echoModelInput.value.trim();
+    const vision = elements.echoVisionInput.checked;
+    if (!baseUrl || !model) {
+      elements.echoAiStatus.textContent = "服务地址和模型不能为空。";
+      return;
+    }
+    localState = writeLocalState({
+      ...localState,
+      preferences: {
+        ...localState.preferences,
+        echoBaseUrl: baseUrl,
+        echoModel: model,
+        echoVision: vision,
+      },
+    });
+    const apiKey = elements.echoApiKeyInput.value.trim();
+    const bridge = window.nightStudyCredential;
+    if (apiKey && bridge?.save) {
+      const saved = await bridge.save("echo-fast", apiKey);
+      if (saved?.ok) {
+        activeEchoApiKey = apiKey;
+        elements.echoApiKeyInput.value = "";
+      } else {
+        elements.echoAiStatus.textContent = "密钥保存到系统安全存储失败，请重试。";
+      }
+    }
+    rebuildEchoClient();
+    updateEchoUi();
+  });
+  elements.echoClearKey?.addEventListener("click", async () => {
+    const bridge = window.nightStudyCredential;
+    if (bridge?.remove) await bridge.remove("echo-fast");
+    activeEchoApiKey = null;
+    rebuildEchoClient();
+    updateEchoUi();
+  });
+  elements.archiveChooseFolder?.addEventListener("click", () => {
+    void chooseArchiveDestination("folder");
+  });
+  elements.archiveChooseObsidian?.addEventListener("click", () => {
+    void chooseArchiveDestination("obsidian");
+  });
+  elements.archiveExportAll?.addEventListener("click", () => {
+    void exportAllTracesForBook();
+  });
+  elements.archiveClear?.addEventListener("click", async () => {
+    const bridge = window.nightStudyArchive;
+    if (bridge?.clearDestination) await bridge.clearDestination();
+    await refreshArchiveUi();
+  });
+}
+
+bindEchoArchiveControls();
 
 function emptyRenderSnapshot() {
   const budget = cacheBudgetForDeviceMemory(deviceMemoryGb, {
@@ -593,7 +912,8 @@ function collectDiagnosticsSnapshot() {
     readableChunks: collectReadableChunkDiagnostics(),
     credential: {
       bridge: credentialBridgeState,
-      hasApiKey: Boolean(activeCredentialApiKey),
+      hasApiKey: Boolean(activeEchoApiKey),
+      hasTtsApiKey: Boolean(activeTtsCredentialApiKey),
     },
     tts: {
       controller: ttsController.snapshot(),

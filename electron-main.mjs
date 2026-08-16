@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell } from "electron";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -182,7 +182,7 @@ async function initializeArchiveInfrastructure() {
       configPath: join(app.getPath("userData"), "archive-config.json"),
       queuePath: join(app.getPath("userData"), "archive-queue.json"),
     });
-    disposeArchiveIpc = registerArchiveIpc({ ipcMain, repository: archiveRepository });
+    disposeArchiveIpc = registerArchiveIpc({ ipcMain, repository: archiveRepository, dialog });
     return true;
   } catch (error) {
     archiveRepository = null;

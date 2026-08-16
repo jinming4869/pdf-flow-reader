@@ -46,9 +46,72 @@ function lineFromSegments(segments) {
   };
 }
 
+function medianOf(values = [], fallback = 0) {
+  const ordered = values.map(finiteNumber).filter(Number.isFinite).sort((a, b) => a - b);
+  if (!ordered.length) return fallback;
+  const middleIndex = Math.floor(ordered.length / 2);
+  return ordered.length % 2
+    ? ordered[middleIndex]
+    : (ordered[middleIndex - 1] + ordered[middleIndex]) / 2;
+}
+
+function rowGapProfile(segments) {
+  const ordered = [...segments].sort((a, b) => finiteNumber(a?.bbox?.x) - finiteNumber(b?.bbox?.x));
+  if (ordered.length < 2) return null;
+  let widest = null;
+  for (let index = 1; index < ordered.length; index += 1) {
+    const previousEnd = finiteNumber(ordered[index - 1]?.bbox?.x) +
+      finiteNumber(ordered[index - 1]?.bbox?.width);
+    const currentStart = finiteNumber(ordered[index]?.bbox?.x);
+    const gap = currentStart - previousEnd;
+    if (gap <= 0) continue;
+    if (!widest || gap > widest.gap) {
+      widest = {
+        gap,
+        start: previousEnd,
+        end: currentStart,
+        mid: (previousEnd + currentStart) / 2,
+      };
+    }
+  }
+  return widest;
+}
+
+/**
+ * Detect a two-column layout from whole-page row groups before any row is
+ * split. A real column gutter is the widest gap of almost every row, and it
+ * sits at a consistent horizontal position; in-line word gaps of justified
+ * single-column text drift across the page and fail the consistency checks.
+ */
+export function detectColumnBoundary(rows = [], { pageWidth = null } = {}) {
+  const measuredWidth = finiteNumber(pageWidth) || Math.max(
+    1,
+    ...rows.flat().map((segment) => finiteNumber(segment?.bbox?.x) + finiteNumber(segment?.bbox?.width)),
+  );
+  const profiles = rows
+    .map((row) => rowGapProfile(row))
+    .filter(Boolean);
+  if (profiles.length < 6) return null;
+  const medianGap = medianOf(profiles.map((profile) => profile.gap));
+  const boundary = medianOf(profiles.map((profile) => profile.mid));
+  const minimumGutter = Math.max(14, measuredWidth * 0.022);
+  if (medianGap < minimumGutter) return null;
+  if (boundary < measuredWidth * 0.3 || boundary > measuredWidth * 0.7) return null;
+  const covering = profiles.filter(
+    (profile) => profile.start <= boundary && profile.end >= boundary,
+  ).length / profiles.length;
+  if (covering < 0.7) return null;
+  const startDeviations = profiles.map(
+    (profile) => Math.abs(profile.start - medianOf(profiles.map((entry) => entry.start))),
+  );
+  if (medianOf(startDeviations) > measuredWidth * 0.06) return null;
+  return boundary;
+}
+
 function splitLineSegments(segments = [], {
   pageWidth = null,
   maxHorizontalGap = null,
+  boundary = null,
 } = {}) {
   const ordered = [...segments].sort((a, b) => finiteNumber(a?.bbox?.x) - finiteNumber(b?.bbox?.x));
   if (ordered.length < 2) return ordered.length ? [ordered] : [];
@@ -59,24 +122,55 @@ function splitLineSegments(segments = [], {
   const threshold = finiteNumber(maxHorizontalGap) > 0
     ? finiteNumber(maxHorizontalGap)
     : Math.max(36, measuredWidth * 0.08);
-  const middle = measuredWidth / 2;
-  const centerGutterThreshold = Math.max(12, measuredWidth * 0.025);
+  const columnBoundary = finiteNumber(boundary);
+  const centerGutterThreshold = Math.max(14, measuredWidth * 0.02);
+  const minColumnFragmentWidth = measuredWidth * 0.06;
+  const adjacentGaps = [];
+  for (let index = 1; index < ordered.length; index += 1) {
+    const previous = ordered[index - 1];
+    const current = ordered[index];
+    const previousEnd = finiteNumber(previous?.bbox?.x) + finiteNumber(previous?.bbox?.width);
+    const gap = finiteNumber(current?.bbox?.x) - previousEnd;
+    adjacentGaps.push({
+      index,
+      gap,
+      previousEnd,
+      currentStart: finiteNumber(current?.bbox?.x),
+      crossesBoundary: columnBoundary > 0 &&
+        previousEnd <= columnBoundary &&
+        finiteNumber(current?.bbox?.x) >= columnBoundary,
+    });
+  }
+  const positiveGaps = adjacentGaps.map((entry) => entry.gap).filter((gap) => gap > 0);
+  const medianGap = positiveGaps.length
+    ? [...positiveGaps].sort((a, b) => a - b)[Math.floor(positiveGaps.length / 2)]
+    : 0;
   const clusters = [];
-  for (const segment of ordered) {
-    const previous = clusters.at(-1)?.at(-1);
-    const previousEnd = previous
-      ? finiteNumber(previous?.bbox?.x) + finiteNumber(previous?.bbox?.width)
-      : null;
-    const gap = previousEnd === null
-      ? 0
-      : finiteNumber(segment?.bbox?.x) - previousEnd;
-    const crossesCenterGutter = Boolean(
-      previousEnd !== null &&
-      previousEnd < middle &&
-      finiteNumber(segment?.bbox?.x) > middle &&
-      gap > centerGutterThreshold
+  for (let index = 0; index < ordered.length; index += 1) {
+    const segment = ordered[index];
+    if (!clusters.length) {
+      clusters.push([segment]);
+      continue;
+    }
+    const entry = adjacentGaps.find((candidate) => candidate.index === index);
+    const boundarySplit = Boolean(entry && entry.crossesBoundary && entry.gap > 0);
+    const rightWidth = finiteNumber(segment?.bbox?.width);
+    const centerSplit = Boolean(
+      entry &&
+      !boundarySplit &&
+      entry.previousEnd <= measuredWidth / 2 &&
+      entry.currentStart >= measuredWidth / 2 &&
+      entry.gap > centerGutterThreshold &&
+      (
+        entry.gap >= centerGutterThreshold * 2 ||
+        rightWidth >= minColumnFragmentWidth
+      )
     );
-    if (!clusters.length || gap > threshold || crossesCenterGutter) {
+    const gapSplit = Boolean(
+      entry &&
+      (entry.gap > threshold || (entry.gap > medianGap * 2.2 && entry.gap > centerGutterThreshold))
+    );
+    if (boundarySplit || centerSplit || gapSplit) {
       clusters.push([segment]);
     } else {
       clusters.at(-1).push(segment);
@@ -108,13 +202,69 @@ export function segmentsToLines(segments = [], {
     group.segments.push(segment);
     group.y = (group.y * (group.segments.length - 1) + y) / group.segments.length;
   }
+  const measuredWidth = finiteNumber(pageWidth) || Math.max(
+    1,
+    ...valid.map((segment) => finiteNumber(segment?.bbox?.x) + finiteNumber(segment?.bbox?.width)),
+  );
+  const boundary = detectColumnBoundary(
+    groups.map((group) => group.segments),
+    { pageWidth: measuredWidth },
+  );
   return groups
     .flatMap((group) => splitLineSegments(group.segments, {
-      pageWidth,
+      pageWidth: measuredWidth,
       maxHorizontalGap,
+      boundary,
     }))
     .map((group) => lineFromSegments(group))
     .filter((line) => line.text);
+}
+
+/**
+ * Locate the boundary between two columns from already-split lines using the
+ * widest gap between consecutive line left edges. Returns null for
+ * single-column pages.
+ */
+export function detectLineColumnBoundary(lines = [], {
+  pageWidth = null,
+  twoColumnMinLines = 4,
+} = {}) {
+  const bodyLines = lines.filter((line) => line?.bbox && String(line.text ?? "").trim());
+  if (bodyLines.length < twoColumnMinLines * 2) return null;
+  const measuredWidth = finiteNumber(pageWidth) || Math.max(
+    1,
+    ...bodyLines.map((line) => finiteNumber(line.bbox.x) + finiteNumber(line.bbox.width)),
+  );
+  const middle = measuredWidth / 2;
+  const middleMargin = measuredWidth * 0.06;
+  const spanningMiddle = (line) => (
+    finiteNumber(line.bbox.x) < middle - middleMargin &&
+    finiteNumber(line.bbox.x) + finiteNumber(line.bbox.width) > middle + middleMargin
+  );
+  const leftEdges = bodyLines
+    .filter((line) => !spanningMiddle(line))
+    .map((line) => finiteNumber(line.bbox.x))
+    .sort((a, b) => a - b);
+  let widest = { width: -Infinity, left: 0, right: 0 };
+  for (let index = 1; index < leftEdges.length; index += 1) {
+    const gap = leftEdges[index] - leftEdges[index - 1];
+    if (gap > widest.width) {
+      widest = { width: gap, left: leftEdges[index - 1], right: leftEdges[index] };
+    }
+  }
+  const boundary = (widest.left + widest.right) / 2;
+  const plausibleBoundary = widest.width >= Math.max(8, measuredWidth * 0.01) &&
+    boundary >= measuredWidth * 0.15 &&
+    boundary <= measuredWidth * 0.85;
+  if (!plausibleBoundary) return null;
+  const left = bodyLines.filter((line) => (
+    !spanningMiddle(line) && finiteNumber(line.bbox.x) < boundary
+  ));
+  const right = bodyLines.filter((line) => (
+    !spanningMiddle(line) && finiteNumber(line.bbox.x) >= boundary
+  ));
+  if (left.length < twoColumnMinLines || right.length < twoColumnMinLines) return null;
+  return boundary;
 }
 
 export function orderLinesForReading(lines = [], { pageWidth = null, twoColumnMinLines = 4, coordinateSystem = "top-down" } = {}) {
@@ -122,21 +272,25 @@ export function orderLinesForReading(lines = [], { pageWidth = null, twoColumnMi
     1,
     ...lines.map((line) => finiteNumber(line.bbox?.x) + finiteNumber(line.bbox?.width)),
   );
-  const middle = measuredWidth / 2;
   const bodyLines = lines.filter((line) => line.bbox && line.text.trim().length > 0);
-  const left = bodyLines.filter((line) => finiteNumber(line.bbox.x) < middle * 0.92);
-  const right = bodyLines.filter((line) => finiteNumber(line.bbox.x) >= middle * 0.92);
-  const likelyTwoColumn = left.length >= twoColumnMinLines && right.length >= twoColumnMinLines;
   const byY = (a, b) => {
     const ay = finiteNumber(a.bbox?.y);
     const by = finiteNumber(b.bbox?.y);
     return coordinateSystem === "pdf" ? by - ay : ay - by;
   };
-  if (!likelyTwoColumn) return [...lines].sort(byY);
+  const middle = measuredWidth / 2;
+  const middleMargin = measuredWidth * 0.06;
+  const spanningMiddle = (line) => (
+    finiteNumber(line.bbox.x) < middle - middleMargin &&
+    finiteNumber(line.bbox.x) + finiteNumber(line.bbox.width) > middle + middleMargin
+  );
+  const boundary = detectLineColumnBoundary(lines, { pageWidth: measuredWidth, twoColumnMinLines });
+  if (boundary === null) return [...lines].sort(byY);
 
   return [
-    ...lines.filter((line) => finiteNumber(line.bbox?.x) < middle).sort(byY),
-    ...lines.filter((line) => finiteNumber(line.bbox?.x) >= middle).sort(byY),
+    ...lines.filter((line) => spanningMiddle(line)).sort(byY),
+    ...lines.filter((line) => !spanningMiddle(line) && finiteNumber(line.bbox?.x) < boundary).sort(byY),
+    ...lines.filter((line) => !spanningMiddle(line) && finiteNumber(line.bbox?.x) >= boundary).sort(byY),
   ];
 }
 

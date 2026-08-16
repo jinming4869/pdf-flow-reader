@@ -98,6 +98,118 @@ test("orderLinesForReading reads the left column before the right column", () =>
   ]);
 });
 
+function twoColumnPage({ pageWidth = 612, leftX = 54, leftWidth = 252, rightX = 330, rightWidth = 252, rows = 8, order = "colwise", top = 100, rowGap = 14, baselineOffset = 0 } = {}) {
+  const segments = [];
+  let index = 0;
+  const pushRow = (row) => {
+    segments.push(segment(`L${row} text`, { x: leftX, y: top + row * rowGap, width: leftWidth, index: index++ }));
+    segments.push(segment(`R${row} text`, { x: rightX, y: top + row * rowGap + baselineOffset, width: rightWidth, index: index++ }));
+  };
+  if (order === "colwise") {
+    for (let row = 0; row < rows; row += 1) {
+      segments.push(segment(`L${row} text`, { x: leftX, y: top + row * rowGap, width: leftWidth, index: index++ }));
+    }
+    for (let row = 0; row < rows; row += 1) {
+      segments.push(segment(`R${row} text`, { x: rightX, y: top + row * rowGap + baselineOffset, width: rightWidth, index: index++ }));
+    }
+  } else {
+    for (let row = 0; row < rows; row += 1) pushRow(row);
+  }
+  return { segments, pageWidth };
+}
+
+function expectedColumnOrder(rows, prefix = "text") {
+  return [
+    ...Array.from({ length: rows }, (_, row) => `L${row} ${prefix}`),
+    ...Array.from({ length: rows }, (_, row) => `R${row} ${prefix}`),
+  ];
+}
+
+test("segmentsToReadableChunks reads IEEE two-column pages left column first", () => {
+  const { segments, pageWidth } = twoColumnPage({ order: "colwise" });
+  const chunks = segmentsToReadableChunks(segments, {
+    pageWidth,
+    coordinateSystem: "top-down",
+    minChars: 1000,
+    maxChars: 2000,
+  });
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0].text, expectedColumnOrder(8).join(" "));
+});
+
+test("segmentsToReadableChunks reads interleaved two-column text left column first", () => {
+  const { segments, pageWidth } = twoColumnPage({ order: "interleaved" });
+  const chunks = segmentsToReadableChunks(segments, {
+    pageWidth,
+    coordinateSystem: "top-down",
+    minChars: 1000,
+    maxChars: 2000,
+  });
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0].text, expectedColumnOrder(8).join(" "));
+});
+
+test("segmentsToLines splits columns with a narrow 14pt gutter", () => {
+  const { segments, pageWidth } = twoColumnPage({ rightX: 320 });
+  const lines = segmentsToLines(segments, { pageWidth, coordinateSystem: "top-down" });
+  const ordered = orderLinesForReading(lines, { pageWidth, coordinateSystem: "top-down" });
+  assert.deepEqual(ordered.map((line) => line.text), expectedColumnOrder(8));
+});
+
+test("segmentsToLines splits columns when baselines drift beyond line tolerance", () => {
+  const { segments, pageWidth } = twoColumnPage({ baselineOffset: 8 });
+  const lines = segmentsToLines(segments, { pageWidth, coordinateSystem: "top-down" });
+  const ordered = orderLinesForReading(lines, { pageWidth, coordinateSystem: "top-down" });
+  assert.deepEqual(ordered.map((line) => line.text), expectedColumnOrder(8));
+});
+
+test("a short last line in the left column does not swallow the right column", () => {
+  const { segments, pageWidth } = twoColumnPage({ rows: 7 });
+  let index = segments.length;
+  segments.push(segment("L7 short", { x: 54, y: 100 + 7 * 14, width: 60, index: index++ }));
+  segments.push(segment("R7 text", { x: 330, y: 100 + 7 * 14, width: 252, index: index++ }));
+  const lines = segmentsToLines(segments, { pageWidth, coordinateSystem: "top-down" });
+  const ordered = orderLinesForReading(lines, { pageWidth, coordinateSystem: "top-down" });
+  assert.deepEqual(ordered.map((line) => line.text), [
+    ...Array.from({ length: 7 }, (_, row) => `L${row} text`),
+    "L7 short",
+    ...Array.from({ length: 7 }, (_, row) => `R${row} text`),
+    "R7 text",
+  ]);
+});
+
+test("a centered heading spanning both columns reads before the left column", () => {
+  const { segments, pageWidth } = twoColumnPage();
+  segments.unshift(segment("SECTION TITLE", { x: 250, y: 60, width: 112, index: -1 }));
+  const lines = segmentsToLines(segments, { pageWidth, coordinateSystem: "top-down" });
+  const ordered = orderLinesForReading(lines, { pageWidth, coordinateSystem: "top-down" });
+  assert.deepEqual(ordered.map((line) => line.text), [
+    "SECTION TITLE",
+    ...expectedColumnOrder(8),
+  ]);
+});
+
+test("single-column rows split near the center with 12pt gaps are not treated as columns", () => {
+  const segments = [];
+  let index = 0;
+  for (let row = 0; row < 8; row += 1) {
+    segments.push(segment(`line ${row} part A`, { x: 54, y: 100 + row * 14, width: 240, index: index++ }));
+    segments.push(segment("part B wide", { x: 306, y: 100 + row * 14, width: 200, index: index++ }));
+  }
+  const lines = segmentsToLines(segments, { pageWidth: 612, coordinateSystem: "top-down" });
+  const ordered = orderLinesForReading(lines, { pageWidth: 612, coordinateSystem: "top-down" });
+  assert.deepEqual(ordered.map((line) => line.text), [
+    "line 0 part A part B wide",
+    "line 1 part A part B wide",
+    "line 2 part A part B wide",
+    "line 3 part A part B wide",
+    "line 4 part A part B wide",
+    "line 5 part A part B wide",
+    "line 6 part A part B wide",
+    "line 7 part A part B wide",
+  ]);
+});
+
 test("segmentsToReadableChunks creates TTS-sized chunks from page segments", () => {
   const chunks = segmentsToReadableChunks([
     segment("The contrast between Collier and Bollen on democracy illustrates this law in action.", { y: 100, index: 1 }),

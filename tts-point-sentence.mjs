@@ -3,6 +3,7 @@
 import { bboxToTopLeft, relativeBbox } from "./chunk-coordinate.mjs";
 import {
   createReadableChunk,
+  detectLineColumnBoundary,
   orderLinesForReading,
   segmentsToLines,
 } from "./readable-chunk.mjs";
@@ -56,24 +57,24 @@ function readingStreams(lines = [], {
   coordinateSystem = "top-down",
 } = {}) {
   const width = measuredPageWidth(lines, pageDimensions, pageWidth);
-  const middle = width / 2;
-  const left = lines.filter((line) => finiteNumber(line?.bbox?.x) < middle * 0.92);
-  const right = lines.filter((line) => finiteNumber(line?.bbox?.x) >= middle * 0.92);
-  const twoColumn = left.length >= twoColumnMinLines && right.length >= twoColumnMinLines;
+  const boundary = detectLineColumnBoundary(lines, {
+    pageWidth: width,
+    twoColumnMinLines,
+  });
   const ordered = orderLinesForReading(lines, {
     pageWidth: width,
     twoColumnMinLines,
     coordinateSystem,
   });
-  if (!twoColumn) return [{ columnIndex: null, lines: ordered }];
+  if (boundary === null) return [{ columnIndex: null, lines: ordered }];
   return [
     {
       columnIndex: 0,
-      lines: ordered.filter((line) => finiteNumber(line?.bbox?.x) < middle),
+      lines: ordered.filter((line) => finiteNumber(line?.bbox?.x) < boundary),
     },
     {
       columnIndex: 1,
-      lines: ordered.filter((line) => finiteNumber(line?.bbox?.x) >= middle),
+      lines: ordered.filter((line) => finiteNumber(line?.bbox?.x) >= boundary),
     },
   ].filter((stream) => stream.lines.length);
 }

@@ -8,6 +8,8 @@ import { registerTraceIpc } from "./trace-ipc.mjs";
 import { createTraceRepository } from "./trace-repository.mjs";
 import { createCredentialStore } from "./credential-store.mjs";
 import { registerCredentialIpc } from "./credential-ipc.mjs";
+import { createArchiveRepository } from "./archive-repository.mjs";
+import { registerArchiveIpc } from "./archive-ipc.mjs";
 
 const appRoot = dirname(fileURLToPath(import.meta.url));
 const applicationName = "夜晚的书斋";
@@ -31,6 +33,8 @@ let traceRepository = null;
 let disposeTraceIpc = null;
 let credentialStore = null;
 let disposeCredentialIpc = null;
+let archiveRepository = null;
+let disposeArchiveIpc = null;
 let pendingPdfPath = findPdfArgument(process.argv.slice(1));
 
 process.on("unhandledRejection", (reason) => {
@@ -168,6 +172,23 @@ async function initializeCredentialInfrastructure() {
     disposeCredentialIpc?.();
     disposeCredentialIpc = null;
     console.error("系统凭据暂不可用，AI 功能将保持禁用：", error);
+    return false;
+  }
+}
+
+async function initializeArchiveInfrastructure() {
+  try {
+    archiveRepository = createArchiveRepository({
+      configPath: join(app.getPath("userData"), "archive-config.json"),
+      queuePath: join(app.getPath("userData"), "archive-queue.json"),
+    });
+    disposeArchiveIpc = registerArchiveIpc({ ipcMain, repository: archiveRepository });
+    return true;
+  } catch (error) {
+    archiveRepository = null;
+    disposeArchiveIpc?.();
+    disposeArchiveIpc = null;
+    console.error("归档基础设施暂不可用：", error);
     return false;
   }
 }
@@ -358,6 +379,8 @@ app.whenReady().then(async () => {
   writeBootProbe("trace");
   await initializeCredentialInfrastructure();
   writeBootProbe("credential", credentialStore?.status() ?? null);
+  await initializeArchiveInfrastructure();
+  writeBootProbe("archive");
   if (process.env.NIGHT_STUDY_CREDENTIAL_SMOKE === "1") {
     await runCredentialSelfCheck();
     return;
@@ -382,6 +405,9 @@ app.on("before-quit", () => {
   disposeCredentialIpc?.();
   disposeCredentialIpc = null;
   credentialStore = null;
+  disposeArchiveIpc?.();
+  disposeArchiveIpc = null;
+  archiveRepository = null;
   if (iconTimer) {
     clearInterval(iconTimer);
     iconTimer = null;

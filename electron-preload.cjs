@@ -14,6 +14,12 @@ const channels = Object.freeze({
   credentialLoad: "night-study:credential-load",
   credentialRemove: "night-study:credential-remove",
   credentialList: "night-study:credential-list",
+  archiveStatus: "night-study:archive-status",
+  archiveSetDestination: "night-study:archive-set-destination",
+  archiveClearDestination: "night-study:archive-clear-destination",
+  archiveExportTrace: "night-study:archive-export-trace",
+  archiveEnqueue: "night-study:archive-enqueue",
+  archiveRetryFailed: "night-study:archive-retry-failed",
 });
 
 function invoke(channel, payload) {
@@ -86,5 +92,26 @@ contextBridge.exposeInMainWorld("nightStudyCredential", Object.freeze({
   },
   list() {
     return invoke(channels.credentialList);
+  },
+}));
+
+contextBridge.exposeInMainWorld("nightStudyArchive", Object.freeze({
+  status() {
+    return invoke(channels.archiveStatus);
+  },
+  setDestination(type, path) {
+    return invoke(channels.archiveSetDestination, { type, path });
+  },
+  clearDestination() {
+    return invoke(channels.archiveClearDestination);
+  },
+  exportTrace(input) {
+    return invoke(channels.archiveExportTrace, input);
+  },
+  enqueue(input) {
+    return invoke(channels.archiveEnqueue, input);
+  },
+  retryFailed() {
+    return invoke(channels.archiveRetryFailed);
   },
 }));

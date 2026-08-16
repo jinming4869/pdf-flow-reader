@@ -22,3 +22,18 @@
 
 - 浏览器调试环境（无 Electron 桥）仍可读旧字段，产品形态不受影响；
 - renderer 持明文密钥于内存供 TTS 调用，未落日志；S2 实现 `TraceEchoProvider` 时评审是否改为主进程代发。
+
+## 2026-08-16：S2 复述客户端与延迟实测复核
+
+结论：一句复述客户端、text-only 自动降级、待生成状态持久化完成；DeepSeek 真实 endpoint 延迟实测 P95 1010ms，远低于 3s 门限。
+
+关键证据：
+
+- Node 回归 405 / 405（echo-client 8 项、echo-state 5 项）；
+- 真实延迟实测（deepseek-chat，20 次，合成句子）：全部成功，P50 822ms、P95 1010ms、min 517ms、max 1046ms；
+- 401 错误路径实测：干净失败为 `EchoRequestError`（status 401），不抛未处理异常，不阻塞套索保存；
+- 视觉能力按声明发送图文，4xx 自动降级 text-only 并记住能力；5xx 不降级；超时与外部取消分别识别；
+- 输出契约：长度上限 400 字符，空输出拒绝；echo-state 的 done 终态与有界重试（最多 3 次）由单测锁定；
+- 实测 key 仅经进程参数传入，未写入任何仓库文件；发送内容为合成句子，不含私人 PDF 数据。
+
+视觉（图文）路径的真实延迟待支持视觉的 OpenAI-compatible 模型实测（当前 DeepSeek 只覆盖 text-only）。

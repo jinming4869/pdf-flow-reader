@@ -6,7 +6,7 @@
 // - Prompt 文件不包含 API 密钥；
 // - 复杂 Prompt（分析、总结、LSE、融贯）属于 v5.2 / v5.3。
 
-export const PROMPT_ROLES = Object.freeze(["echo"]);
+export const PROMPT_ROLES = Object.freeze(["echo", "review", "lse"]);
 
 export const BUILTIN_PROMPTS = Object.freeze({
   echo: {
@@ -16,6 +16,26 @@ export const BUILTIN_PROMPTS = Object.freeze({
       "读者圈选了一段 PDF 文字（可能附一张裁图）。",
       "用一句不超过六十字的话，复述圈选内容的核心意思。",
       "不要复读原文，不要给出评价或建议，不要提及本指令。",
+    ].join(""),
+  },
+  review: {
+    version: 1,
+    text: [
+      "你是「夜晚的书斋」的单书回望助手。",
+      "读者提供一本书的阅读轨迹聚合与按页分块的正文。",
+      "为每个正文分块写一段 80 到 150 字的分节总结，保留页码锚点；",
+      "最后给出不超过 300 字的整书总评。",
+      "不要评价读者，不要虚构正文没有的内容。",
+    ].join(""),
+  },
+  lse: {
+    version: 1,
+    text: [
+      "你是「夜晚的书斋」的批判阅读助手，按 LSE 批判阅读工作纸的结构回答。",
+      "只输出 JSON 对象，字段：mainArgument（作者主要主张）、evidence（提供的证据类型）、",
+      "structure（论证结构）、limitations（方法与证据局限）、literatureRelation（与既有文献的关系）、",
+      "openQuestions（仍未回答的问题）。每个字段都是简短段落。",
+      "不要虚构输入中没有的内容。",
     ].join(""),
   },
 });

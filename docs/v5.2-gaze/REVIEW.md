@@ -55,3 +55,15 @@
 - key 仅经进程参数传入，未写入任何仓库文件。
 
 长书分块与真实书验收仍属产品所有者主观项。
+
+## 2026-08-16：Zotero 真实环境实测
+
+用产品所有者提供的 zotero.org API key（userID 19942372）实测：
+
+- verifyKey：库读写 + 文件权限齐全；local API 运行中；
+- 已匹配路径：真实文献《International Statebuilding...》经附件文件名精确匹配（ZQ3936ZW），child note 写入成功（PFRHWQTR）；
+- 未匹配路径：条目创建 + 附件条目创建成功；文件上传因产品所有者网络环境无法解析 `files.zotero.net`（ENOTFOUND，nslookup 可解析但系统 resolver 失败）未能完成——属网络环境问题，错误已结构化展示；
+- 修复两个协议错误：child note 走 POST /items 带 parentItem（/children 只读）；文件上传改为 Zotero 三步协议（授权 → 上传 → 注册）；
+- 残留测试条目已全部清理，仅保留一条标注明确的测试 note（挂在 International Statebuilding 条目下，可在 Zotero 中删除）。
+
+未匹配路径的上传完成条件：产品所有者网络可访问 `files.zotero.net`（检查代理 / DNS 规则）。

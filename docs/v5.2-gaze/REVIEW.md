@@ -25,3 +25,23 @@
 - Web API 写入（需要产品所有者创建 zotero.org API key 与 library ID）；
 - 未匹配时创建条目 + 上传 PDF；
 - macOS 文件关联打包实测（Zotero 附件“打开方式”选中书斋）。
+
+## 2026-08-16：S4 界面接入与 S5 打包复核
+
+结论：回望 / LSE / Zotero 界面接入完成；5.2.0-beta.1 打包候选交付，等待产品所有者真实环境验收。
+
+关键证据：
+
+- Node 回归 466 / 466；
+- Electron smoke 五套：integration（exit 0）、credential、archive、zotero、review-ui 全部 passed；
+- review-ui smoke 实测：授权清单显示真实发送规模（整书 3583 字 + 航迹数），强分析未配置时安静禁用，本机 Zotero 探测“运行中”；
+- packaged 未签名：凭据自检与归档自检 exit 0，三语言 TTS 与硬取消通过；
+- packaged Info.plist 已注册 PDF 文件关联（CFBundleDocumentTypes）；
+- ad-hoc 深签名 + strict verify 通过；
+- 候选：`night-study-5.2.0-beta.1-mac-arm64.zip`，SHA-256 `383f2b5a984f7fd5fdf437e69de1c678623d4dade1d4b1af9e7f37c0ac2d403d`。
+
+### S5 剩余：产品所有者真实环境验收
+
+- 回望与 LSE：真实书（需要新的 echo-strong 凭据）；
+- Zotero 双向：zotero.org API key + library ID，已匹配写 note / 未匹配创建条目 + 上传 PDF；
+- Zotero → 书斋：Zotero 附件“打开方式”选中书斋并双击打开。

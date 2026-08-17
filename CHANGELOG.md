@@ -4,6 +4,14 @@
 
 ## Unreleased
 
+### v5.2.0-beta.1 回望
+
+- 逐项授权：三种发送范围（复述 / 回望 / LSE），回望与 LSE 按书明确授权，发送前展示内容清单。
+- 单书回望：航迹聚合 + 整书正文分块渐进生成，可分节保留页码锚点，中段失败保留已完成部分，可取消。
+- LSE 工作纸：官方模板六字段，从回望结果生成，输出可归档。
+- Zotero 双向：Zotero 附件可用书斋打开（macOS 文件关联）；书斋可把当前书导入 Zotero（本地匹配条目写 note，未匹配创建条目并上传 PDF）。
+- Prompt 分层扩展到回望与 LSE。
+
 ### v5.1.0-beta.1 回声与归档
 
 - 系统凭据：API 密钥只进 Electron safeStorage（macOS Keychain），不可用时 AI 静默禁用；旧 localStorage 明文 TTS 密钥自动迁移后删除。

@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell } from "electron";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -232,6 +232,88 @@ async function runCredentialSelfCheck() {
   }
 }
 
+async function runArchiveSelfCheck() {
+  try {
+    const destination = join(app.getPath("temp"), `night-study-archive-check-${process.pid}`);
+    const trace = {
+      schemaVersion: 1,
+      id: "trace_packaged_check",
+      documentId: "doc_1",
+      documentFingerprint: "v1:packaged:1:2",
+      pageIndex: 0,
+      lassoPath: [{ x: 0.1, y: 0.2, time: 0 }],
+      source: { text: "合成圈选文字，不含私人内容。", provenance: "native-text" },
+      readingContext: {
+        speedTier: "long-day",
+        speedPxPerSecond: 16,
+        readingOrder: 0,
+        capturedAt: new Date().toISOString(),
+      },
+      crop: {
+        state: "ready",
+        reference: "crops/trace_packaged_check.png",
+        mimeType: "image/png",
+        width: 32,
+        height: 20,
+        errorCode: null,
+        updatedAt: new Date().toISOString(),
+      },
+      emotion: {
+        state: "placed",
+        original: { valence: 0.5, arousal: -0.3 },
+        current: { valence: -0.5, arousal: -0.5 },
+        updatedAt: new Date().toISOString(),
+      },
+      lifecycle: "active",
+      trashedAt: null,
+      purgeAfter: null,
+      purgedAt: null,
+      revision: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const result = {};
+    archiveRepository.setDestination({ type: "folder", path: destination });
+    result.written = archiveRepository.exportTrace({
+      trace,
+      documentName: "打包自检书.pdf",
+      echoText: "合成复述。",
+      cropBytes: new Uint8Array([1, 2, 3]),
+    });
+    result.skipped = archiveRepository.exportTrace({
+      trace,
+      documentName: "打包自检书.pdf",
+      echoText: "合成复述。",
+      cropBytes: new Uint8Array([1, 2, 3]),
+    });
+    const bookDirectory = join(destination, "打包自检书.pdf");
+    let files = [];
+    try {
+      files = readdirSync(bookDirectory);
+    } catch {
+      files = [];
+    }
+    result.passed = Boolean(
+      result.written?.status === "written" &&
+      result.skipped?.status === "skipped" &&
+      files.some((file) => file.endsWith(".md")) &&
+      files.some((file) => file.endsWith(".png"))
+    );
+    console.log(`ARCHIVE_SELF_CHECK ${JSON.stringify({ ...result, files })}`);
+    try {
+      rmSync(destination, { recursive: true, force: true });
+    } catch {
+      // 清理失败不影响结论。
+    }
+    setTimeout(() => app.exit(result.passed ? 0 : 1), 0);
+    return true;
+  } catch (error) {
+    console.error(`ARCHIVE_SELF_CHECK_FAILED ${error?.message ?? error}`);
+    setTimeout(() => app.exit(1), 0);
+    return false;
+  }
+}
+
 async function runHeadlessSmoke(window) {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
@@ -381,6 +463,10 @@ app.whenReady().then(async () => {
   writeBootProbe("credential", credentialStore?.status() ?? null);
   await initializeArchiveInfrastructure();
   writeBootProbe("archive");
+  if (process.env.NIGHT_STUDY_ARCHIVE_SMOKE === "1") {
+    await runArchiveSelfCheck();
+    return;
+  }
   if (process.env.NIGHT_STUDY_CREDENTIAL_SMOKE === "1") {
     await runCredentialSelfCheck();
     return;

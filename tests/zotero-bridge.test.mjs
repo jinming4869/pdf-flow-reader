@@ -17,8 +17,8 @@ function fakeLocal(matchResult) {
   };
 }
 
-function fakeWeb({ verify = {}, note = { noteKey: "N1", version: 1 }, created = { itemKey: "I1", version: 2 }, upload = { uploaded: true } } = {}) {
-  const calls = { verify: 0, note: 0, create: 0, upload: 0 };
+function fakeWeb({ verify = {}, note = { noteKey: "N1", version: 1 }, created = { itemKey: "I1", version: 2 }, attachment = { attachmentKey: "A1", version: 3 }, upload = { uploaded: true } } = {}) {
+  const calls = { verify: 0, note: 0, create: 0, upload: 0, attachment: 0 };
   return {
     calls,
     verifyKey: async () => {
@@ -28,6 +28,10 @@ function fakeWeb({ verify = {}, note = { noteKey: "N1", version: 1 }, created = 
     createPdfItem: async () => {
       calls.create += 1;
       return created;
+    },
+    createAttachmentChild: async () => {
+      calls.attachment += 1;
+      return attachment;
     },
     uploadPdf: async () => {
       calls.upload += 1;
@@ -65,7 +69,7 @@ test("pushBook writes a note onto a matched item without creating or uploading",
   assert.equal(result.itemKey, "P1");
   assert.equal(result.noteKey, "N1");
   assert.equal(result.createdItem, false);
-  assert.deepEqual(web.calls, { verify: 0, note: 1, create: 0, upload: 0 });
+  assert.deepEqual(web.calls, { verify: 0, note: 1, create: 0, upload: 0, attachment: 0 });
 });
 
 test("pushBook creates an item and uploads the pdf when nothing matches", async () => {
@@ -85,7 +89,7 @@ test("pushBook creates an item and uploads the pdf when nothing matches", async 
   assert.equal(result.itemKey, "I1");
   assert.equal(result.createdItem, true);
   assert.equal(result.noteKey, "N1");
-  assert.deepEqual(web.calls, { verify: 0, note: 1, create: 1, upload: 1 });
+  assert.deepEqual(web.calls, { verify: 0, note: 1, create: 1, upload: 1, attachment: 1 });
 });
 
 test("pushBook fails quietly when local matching throws", async () => {

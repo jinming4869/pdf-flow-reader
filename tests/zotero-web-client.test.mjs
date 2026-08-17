@@ -44,34 +44,83 @@ test("createPdfItem posts a document item and returns the new key", async () => 
       const body = JSON.parse(init.body);
       assert.equal(body[0].itemType, "document");
       assert.equal(body[0].title, "测量与效度.pdf");
+      assert.equal("contentType" in body[0], false);
       return { body: { successful: { "0": { key: "NEWKEY", version: 3 } } } };
     }),
   });
-  const created = await client.createPdfItem({ title: "测量与效度.pdf", fileName: "测量与效度.pdf" });
+  const created = await client.createPdfItem({ title: "测量与效度.pdf" });
   assert.deepEqual(created, { itemKey: "NEWKEY", version: 3 });
 });
 
-test("uploadPdf posts multipart with If-None-Match guard", async () => {
+test("createAttachmentChild posts an imported-file attachment under the parent", async () => {
   const client = createZoteroWebClient({
     apiKey: "zot-key",
     libraryId: "9",
     fetchFn: mockFetch((url, init) => {
-      assert.match(url, /\/users\/9\/items\/K1\/file$/);
-      assert.equal(init.headers["If-None-Match"], "*");
-      assert.match(init.headers["Content-Type"], /^multipart\/form-data; boundary=/);
-      return { body: { uploaded: 1 } };
+      assert.match(url, /\/users\/9\/items$/);
+      const body = JSON.parse(init.body);
+      assert.equal(body[0].itemType, "attachment");
+      assert.equal(body[0].parentItem, "D1");
+      assert.equal(body[0].linkMode, "imported_file");
+      assert.equal(body[0].contentType, "application/pdf");
+      return { body: { successful: { "0": { key: "ATT1", version: 4 } } } };
     }),
+  });
+  const result = await client.createAttachmentChild("D1", "书.pdf");
+  assert.deepEqual(result, { attachmentKey: "ATT1", version: 4 });
+});
+
+test("uploadPdf follows the three-step upload protocol", async () => {
+  const calls = [];
+  const client = createZoteroWebClient({
+    apiKey: "zot-key",
+    libraryId: "9",
+    fetchFn: async (url, init) => {
+      calls.push({ url: String(url), init });
+      if (String(url).includes("api.zotero.org") && init.method === "POST" && !String(init.body).includes("upload=")) {
+        assert.equal(init.headers["If-None-Match"], "*");
+        assert.match(init.headers["Content-Type"], /application\/x-www-form-urlencoded/);
+        assert.match(String(init.body), /md5=/);
+        assert.match(String(init.body), /filesize=3/);
+        return { ok: true, status: 200, text: async () => JSON.stringify({
+          url: "https://up.example.com/put",
+          contentType: "application/pdf",
+          prefix: "--p\r\n",
+          suffix: "\r\n--p--",
+          uploadKey: "UK1",
+        }) };
+      }
+      if (String(url).includes("up.example.com")) {
+        assert.equal(init.headers["Content-Type"], "application/pdf");
+        return { ok: true, status: 201, text: async () => "" };
+      }
+      // 注册请求。
+      assert.match(String(init.body), /upload=UK1/);
+      return { ok: true, status: 204, text: async () => "" };
+    },
   });
   const result = await client.uploadPdf("K1", new Uint8Array([1, 2, 3]), "书.pdf");
   assert.equal(result.uploaded, true);
+  assert.equal(typeof result.md5, "string");
+  assert.equal(calls.length, 3);
 });
 
-test("createChildNote posts a note child and returns its key", async () => {
+test("uploadPdf returns existed when the server already has the file", async () => {
+  const client = createZoteroWebClient({
+    apiKey: "zot-key",
+    libraryId: "9",
+    fetchFn: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ exists: 1 }) }),
+  });
+  const result = await client.uploadPdf("K1", new Uint8Array([1]), "书.pdf");
+  assert.deepEqual(result, { uploaded: false, existed: true, md5: result.md5 });
+});
+
+test("createChildNote posts through the items endpoint with a parentItem", async () => {
   const client = createZoteroWebClient({
     apiKey: "zot-key",
     libraryId: "9",
     fetchFn: mockFetch((url, init) => {
-      assert.match(url, /\/users\/9\/items\/P1\/children$/);
+      assert.match(url, /\/users\/9\/items$/);
       const body = JSON.parse(init.body);
       assert.equal(body[0].itemType, "note");
       assert.equal(body[0].parentItem, "P1");

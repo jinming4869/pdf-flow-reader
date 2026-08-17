@@ -107,11 +107,16 @@ export function createZoteroBridge({
         const note = await web.createChildNote(match.itemKey, noteHtml);
         result.noteKey = note.noteKey;
       } else {
-        const created = await web.createPdfItem({ title: title || fileName, fileName });
+        const created = await web.createPdfItem({ title: title || fileName });
         result.itemKey = created.itemKey;
         result.createdItem = true;
         if (pdfBytes?.byteLength) {
-          await web.uploadPdf(created.itemKey, pdfBytes, fileName || "document.pdf");
+          const attachment = await web.createAttachmentChild(
+            created.itemKey,
+            fileName || "document.pdf",
+          );
+          result.attachmentKey = attachment.attachmentKey;
+          await web.uploadPdf(attachment.attachmentKey, pdfBytes, fileName || "document.pdf");
         }
         const note = await web.createChildNote(created.itemKey, noteHtml);
         result.noteKey = note.noteKey;

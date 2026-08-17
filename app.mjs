@@ -109,6 +109,25 @@ import {
 } from "./echo-state.mjs";
 import { resolvePrompt } from "./prompt-templates.mjs";
 import {
+  buildReviewInput,
+  buildTraceAggregate,
+} from "./review-input.mjs";
+import { createReviewClient } from "./review-client.mjs";
+import {
+  readReviewState,
+  recordReviewPending,
+  recordReviewResult,
+  writeReviewState,
+} from "./review-state.mjs";
+import {
+  grantScope,
+  isScopeGranted,
+  readSendConsent,
+  summarizeSendPayload,
+  writeSendConsent,
+} from "./send-consent.mjs";
+import { createLseClient } from "./lse-client.mjs";
+import {
   cacheBudgetForDeviceMemory,
   RenderScheduler,
 } from "./render-scheduler.mjs";
@@ -211,6 +230,32 @@ const elements = {
   echoVisionInput: document.querySelector("#echoVisionInput"),
   echoSaveConfig: document.querySelector("#echoSaveConfig"),
   echoClearKey: document.querySelector("#echoClearKey"),
+  strongAiStatus: document.querySelector("#strongAiStatus"),
+  strongBaseUrlInput: document.querySelector("#strongBaseUrlInput"),
+  strongModelInput: document.querySelector("#strongModelInput"),
+  strongApiKeyInput: document.querySelector("#strongApiKeyInput"),
+  strongSaveConfig: document.querySelector("#strongSaveConfig"),
+  strongClearKey: document.querySelector("#strongClearKey"),
+  zoteroStatus: document.querySelector("#zoteroStatus"),
+  zoteroApiKeyInput: document.querySelector("#zoteroApiKeyInput"),
+  zoteroLibraryIdInput: document.querySelector("#zoteroLibraryIdInput"),
+  zoteroSaveCredentials: document.querySelector("#zoteroSaveCredentials"),
+  zoteroRefreshStatus: document.querySelector("#zoteroRefreshStatus"),
+  zoteroPushButton: document.querySelector("#zoteroPushButton"),
+  bookTraceReview: document.querySelector("#bookTraceReview"),
+  reviewPanel: document.querySelector("#reviewPanel"),
+  reviewClose: document.querySelector("#reviewClose"),
+  reviewConsentSection: document.querySelector("#reviewConsentSection"),
+  reviewConsentSummary: document.querySelector("#reviewConsentSummary"),
+  reviewGrantButton: document.querySelector("#reviewGrantButton"),
+  reviewCancelGeneration: document.querySelector("#reviewCancelGeneration"),
+  reviewProgressSection: document.querySelector("#reviewProgressSection"),
+  reviewProgressText: document.querySelector("#reviewProgressText"),
+  reviewResultSection: document.querySelector("#reviewResultSection"),
+  reviewResultMeta: document.querySelector("#reviewResultMeta"),
+  reviewSections: document.querySelector("#reviewSections"),
+  lseGenerateButton: document.querySelector("#lseGenerateButton"),
+  lseResult: document.querySelector("#lseResult"),
   archiveStatus: document.querySelector("#archiveStatus"),
   archiveChooseFolder: document.querySelector("#archiveChooseFolder"),
   archiveChooseObsidian: document.querySelector("#archiveChooseObsidian"),
@@ -384,6 +429,11 @@ async function initializeCredentialBridge() {
     if (loadedEcho?.ok && typeof loadedEcho.secret === "string" && loadedEcho.secret) {
       activeEchoApiKey = loadedEcho.secret;
       rebuildEchoClient();
+    }
+    const loadedStrong = await bridge.load("echo-strong");
+    if (loadedStrong?.ok && typeof loadedStrong.secret === "string" && loadedStrong.secret) {
+      strongApiKey = loadedStrong.secret;
+      rebuildStrongClients();
     }
   } catch {
     credentialBridgeState = { available: false, reason: "bridge-error" };
@@ -707,6 +757,7 @@ function renderEchoForSelectedTrace(trace) {
 
 function openEchoArchivePanel() {
   updateEchoUi();
+  updateStrongUi();
   void refreshArchiveUi();
   elements.echoArchivePanel.hidden = false;
 }
@@ -845,6 +896,414 @@ function bindEchoArchiveControls() {
 }
 
 bindEchoArchiveControls();
+
+// ———— v5.2 单书回望、LSE 与 Zotero ————
+
+let reviewState = readReviewState();
+let sendConsent = readSendConsent();
+let strongApiKey = null;
+let reviewClient = null;
+let lseClient = null;
+let reviewAbortController = null;
+let lastReviewInput = null;
+let zoteroProbeCache = null;
+
+const STRONG_PREFERENCES_DEFAULTS = Object.freeze({
+  strongBaseUrl: "https://api.deepseek.com",
+  strongModel: "deepseek-chat",
+});
+
+function strongPreferences() {
+  return {
+    ...STRONG_PREFERENCES_DEFAULTS,
+    strongBaseUrl: typeof localState.preferences.strongBaseUrl === "string" && localState.preferences.strongBaseUrl
+      ? localState.preferences.strongBaseUrl
+      : STRONG_PREFERENCES_DEFAULTS.strongBaseUrl,
+    strongModel: typeof localState.preferences.strongModel === "string" && localState.preferences.strongModel
+      ? localState.preferences.strongModel
+      : STRONG_PREFERENCES_DEFAULTS.strongModel,
+  };
+}
+
+function rebuildStrongClients() {
+  reviewClient = null;
+  lseClient = null;
+  if (!strongApiKey) return;
+  const preferences = strongPreferences();
+  try {
+    reviewClient = createReviewClient({
+      apiKey: strongApiKey,
+      baseUrl: preferences.strongBaseUrl,
+      model: preferences.strongModel,
+      systemText: resolvePrompt("review").text,
+    });
+    lseClient = createLseClient({
+      apiKey: strongApiKey,
+      baseUrl: preferences.strongBaseUrl,
+      model: preferences.strongModel,
+      systemText: resolvePrompt("lse").text,
+    });
+  } catch (error) {
+    reviewClient = null;
+    lseClient = null;
+    console.error("回望客户端初始化失败：", error?.message ?? error);
+  }
+}
+
+function updateStrongUi() {
+  if (!elements.strongAiStatus) return;
+  if (!strongApiKey) {
+    elements.strongAiStatus.textContent = "未配置强分析凭据；回望与 LSE 保持禁用。";
+  } else {
+    const preferences = strongPreferences();
+    elements.strongAiStatus.textContent = `已配置：${preferences.strongBaseUrl} · ${preferences.strongModel}`;
+  }
+  elements.strongBaseUrlInput.value = strongPreferences().strongBaseUrl;
+  elements.strongModelInput.value = strongPreferences().strongModel;
+  elements.strongApiKeyInput.value = "";
+}
+
+async function collectBookFullTextPages({ onProgress = () => {}, signal = null } = {}) {
+  const pages = [];
+  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+    if (signal?.aborted) throw signal.reason ?? new DOMException("已取消", "AbortError");
+    try {
+      await extractPageTextStats(pageNumber, loadGeneration);
+    } catch {
+      // 单页提取失败不阻断整书收集。
+    }
+    const chunks = readableChunksForPage(pageNumber);
+    const text = chunks.map((chunk) => chunk.text).join("\n").trim();
+    if (text) pages.push({ pageIndex: pageNumber - 1, text });
+    onProgress({ page: pageNumber, total: pageCount });
+  }
+  return pages;
+}
+
+async function collectBookTraces() {
+  if (!activeTraceDocument) return [];
+  try {
+    return await traceClient.listTraces(activeTraceDocument.id, { includeTrashed: false });
+  } catch {
+    return [];
+  }
+}
+
+function reviewConsentLines(pages, traces) {
+  const totalChars = pages.reduce((sum, page) => sum + page.text.length, 0);
+  return summarizeSendPayload("review", {
+    fullTextLength: totalChars,
+    traceCount: traces.length,
+  }).lines;
+}
+
+async function openReviewPanel() {
+  elements.reviewPanel.hidden = false;
+  elements.reviewConsentSection.hidden = false;
+  elements.reviewProgressSection.hidden = true;
+  elements.reviewResultSection.hidden = true;
+  elements.lseResult.hidden = true;
+  elements.reviewConsentSummary.textContent = "正在统计发送内容…";
+  const traces = await collectBookTraces();
+  const pages = await collectBookFullTextPages();
+  lastReviewInput = buildReviewInput(pages, traces);
+  const lines = reviewConsentLines(pages, traces);
+  const granted = activeTraceDocument
+    ? isScopeGranted(sendConsent, "review", activeTraceDocument.id)
+    : false;
+  if (granted) {
+    elements.reviewConsentSummary.textContent = `已授权本 书：${lines.join("；")}`;
+    elements.reviewGrantButton.textContent = "再次生成回望";
+  } else {
+    elements.reviewConsentSummary.textContent = `发送内容：${lines.join("；")}。确认后这些内容会发送到强分析模型。`;
+    elements.reviewGrantButton.textContent = "确认发送并生成回望";
+  }
+  const record = activeTraceDocument ? reviewState.records?.[activeTraceDocument.id] : null;
+  if (record && (record.status === "done" || record.status === "partial")) {
+    elements.reviewResultSection.hidden = false;
+    renderReviewResult(record);
+  }
+}
+
+function closeReviewPanel() {
+  elements.reviewPanel.hidden = true;
+}
+
+function reviewStatusText(record) {
+  if (!record) return "尚未生成。";
+  if (record.status === "pending") return "正在生成…";
+  if (record.status === "done") return `已生成（${record.sections.length} 节）· ${record.generatedAt}`;
+  if (record.status === "partial") return `部分完成（${record.sections.length} 节，第 ${record.sections.length + 1} 节失败）· ${record.errorCode}`;
+  if (record.status === "cancelled") return "已取消。";
+  return `生成失败：${record.errorCode ?? "未知原因"}`;
+}
+
+function renderReviewResult(record) {
+  elements.reviewResultMeta.textContent = reviewStatusText(record);
+  elements.reviewSections.textContent = "";
+  for (const section of record.sections ?? []) {
+    const entry = document.createElement("div");
+    entry.className = "review-section-entry";
+    const label = document.createElement("strong");
+    label.textContent = `第 ${section.pageStart + 1} 页 — 第 ${section.pageEnd + 1} 页`;
+    const text = document.createElement("p");
+    text.textContent = section.text;
+    entry.append(label, text);
+    elements.reviewSections.append(entry);
+  }
+  elements.reviewResultSection.hidden = false;
+}
+
+async function startReviewGeneration() {
+  if (!activeTraceDocument) return;
+  if (!reviewClient) {
+    elements.reviewConsentSummary.textContent = "未配置强分析凭据；先在“回声／归档”里配置。";
+    return;
+  }
+  if (!isScopeGranted(sendConsent, "review", activeTraceDocument.id)) {
+    sendConsent = writeSendConsent(grantScope(sendConsent, "review", activeTraceDocument.id));
+  }
+  reviewState = writeReviewState(recordReviewPending(reviewState, activeTraceDocument.id));
+  reviewAbortController = new AbortController();
+  elements.reviewConsentSection.hidden = true;
+  elements.reviewProgressSection.hidden = false;
+  elements.reviewResultSection.hidden = true;
+  elements.reviewCancelGeneration.hidden = false;
+  elements.reviewProgressText.textContent = "正在收集整书正文…";
+  try {
+    const pages = await collectBookFullTextPages({ signal: reviewAbortController.signal });
+    elements.reviewProgressText.textContent = `正文收集完成（${pages.length} 页），正在生成回望…`;
+    const input = buildReviewInput(pages, await collectBookTraces());
+    lastReviewInput = input;
+    const result = await reviewClient.generateReview({
+      chunks: input.chunks,
+      aggregateText: input.aggregate.render(),
+      signal: reviewAbortController.signal,
+      onProgress: ({ index, total, done, error }) => {
+        if (error) {
+          elements.reviewProgressText.textContent = `第 ${index + 1} 节失败（${error}），保留已完成部分。`;
+        } else {
+          elements.reviewProgressText.textContent = `已生成 ${done}/${total} 节…`;
+        }
+      },
+    });
+    const status = result.cancelled ? "cancelled" : (result.failedIndex !== null ? "partial" : "done");
+    reviewState = writeReviewState(recordReviewResult(reviewState, activeTraceDocument.id, {
+      status,
+      sections: result.sections,
+      errorCode: result.errorCode,
+      model: strongPreferences().strongModel,
+    }));
+    const record = reviewState.records?.[activeTraceDocument.id];
+    elements.reviewProgressSection.hidden = true;
+    renderReviewResult(record);
+  } catch (error) {
+    const cancelled = error?.name === "AbortError";
+    reviewState = writeReviewState(recordReviewResult(reviewState, activeTraceDocument.id, {
+      status: cancelled ? "cancelled" : "failed",
+      sections: [],
+      errorCode: cancelled ? null : "REVIEW_COLLECT_FAILED",
+    }));
+    elements.reviewProgressSection.hidden = true;
+    renderReviewResult(reviewState.records[activeTraceDocument.id]);
+  } finally {
+    reviewAbortController = null;
+    elements.reviewCancelGeneration.hidden = true;
+  }
+}
+
+const LSE_FIELD_LABELS = Object.freeze({
+  mainArgument: "作者主要主张",
+  evidence: "证据类型",
+  structure: "论证结构",
+  limitations: "方法与证据局限",
+  literatureRelation: "与既有文献的关系",
+  openQuestions: "仍未回答的问题",
+});
+
+function renderLseResult(worksheet) {
+  elements.lseResult.textContent = "";
+  for (const [field, label] of Object.entries(LSE_FIELD_LABELS)) {
+    if (!worksheet[field]) continue;
+    const entry = document.createElement("div");
+    entry.className = "lse-field";
+    const strong = document.createElement("strong");
+    strong.textContent = label;
+    const text = document.createElement("p");
+    text.textContent = worksheet[field];
+    entry.append(strong, text);
+    elements.lseResult.append(entry);
+  }
+  elements.lseResult.hidden = false;
+}
+
+async function generateLse() {
+  if (!activeTraceDocument || !lseClient) {
+    elements.reviewResultMeta.textContent = "未配置强分析凭据，无法生成 LSE 工作纸。";
+    return;
+  }
+  const record = reviewState.records?.[activeTraceDocument.id];
+  const reviewText = (record?.sections ?? [])
+    .map((section) => `[第 ${section.pageStart + 1} 页 — 第 ${section.pageEnd + 1} 页] ${section.text}`)
+    .join("\n");
+  if (!reviewText) {
+    elements.reviewResultMeta.textContent = "先生成回望，再生成 LSE 工作纸。";
+    return;
+  }
+  sendConsent = writeSendConsent(grantScope(sendConsent, "lse", activeTraceDocument.id));
+  elements.lseGenerateButton.disabled = true;
+  elements.lseGenerateButton.textContent = "正在生成 LSE 工作纸…";
+  try {
+    const aggregate = lastReviewInput?.aggregate?.render() ?? "";
+    const result = await lseClient.generateWorksheet({ reviewText, aggregateText: aggregate });
+    renderLseResult(result.worksheet);
+  } catch (error) {
+    elements.reviewResultMeta.textContent = `LSE 生成失败：${error?.code ?? error?.message ?? "未知原因"}`;
+  } finally {
+    elements.lseGenerateButton.disabled = false;
+    elements.lseGenerateButton.textContent = "生成 LSE 工作纸";
+  }
+}
+
+async function refreshZoteroStatus() {
+  const bridge = window.nightStudyZotero;
+  if (!bridge?.probe) {
+    elements.zoteroStatus.textContent = "Zotero 桥接需要桌面版环境。";
+    return;
+  }
+  const probe = await bridge.probe();
+  if (probe?.ok && probe.available) {
+    zoteroProbeCache = probe;
+    let matchText = "";
+    if (activeTraceDocument) {
+      const match = await bridge.matchBook({
+        fileName: activeTraceDocument.fileName ?? "",
+        title: activeTraceDocument.fileName ?? "",
+      });
+      if (match?.ok) {
+        matchText = match.matched
+          ? ` · 已匹配条目「${match.title ?? ""}」`
+          : " · 未匹配，导入时将创建条目";
+      }
+    }
+    elements.zoteroStatus.textContent = `Zotero 运行中${matchText}`;
+  } else {
+    elements.zoteroStatus.textContent = `Zotero 未运行或本地 API 未开启（${probe?.error?.code ?? "unknown"}）。`;
+  }
+}
+
+async function pushCurrentBookToZotero() {
+  const bridge = window.nightStudyZotero;
+  if (!bridge?.pushBook || !activeTraceDocument) return;
+  elements.zoteroPushButton.disabled = true;
+  elements.zoteroPushButton.textContent = "正在导入…";
+  try {
+    let pdfBytes = null;
+    try {
+      const response = await fetch("./document.pdf", { cache: "no-store" });
+      if (response.ok) pdfBytes = new Uint8Array(await response.arrayBuffer());
+    } catch {
+      // 拿不到 PDF 内容时仍可写 note（匹配成功路径）。
+    }
+    const fileName = activeTraceDocument.fileName ?? "document.pdf";
+    const traces = await collectBookTraces();
+    const noteLines = [
+      `<p>来自「夜晚的书斋」：${traces.length} 条读书痕迹</p>`,
+    ];
+    for (const trace of traces.slice(0, 8)) {
+      const page = trace.pageIndex + 1;
+      const emotion = trace.emotion?.current
+        ? `(${Number(trace.emotion.current.valence).toFixed(2)}, ${Number(trace.emotion.current.arousal).toFixed(2)})`
+        : "未放置";
+      noteLines.push(`<p>第 ${page} 页 · 情绪 ${emotion} · ${trace.source?.text?.slice(0, 60) ?? ""}</p>`);
+    }
+    const result = await bridge.pushBook({
+      fileName,
+      title: fileName,
+      pdfBytes,
+      noteHtml: noteLines.join(""),
+    });
+    if (result?.ok) {
+      elements.zoteroStatus.textContent = result.createdItem
+        ? `已创建 Zotero 条目并导入（条目 ${result.itemKey}，note ${result.noteKey}）。`
+        : `已写入 Zotero 条目 ${result.itemKey} 的 note（${result.noteKey}）。`;
+    } else {
+      elements.zoteroStatus.textContent = `导入失败：${result?.error?.code ?? "unknown"}。`;
+    }
+  } finally {
+    elements.zoteroPushButton.disabled = false;
+    elements.zoteroPushButton.textContent = "导入当前书到 Zotero";
+  }
+}
+
+function bindReviewControls() {
+  elements.bookTraceReview?.addEventListener("click", () => {
+    void openReviewPanel();
+  });
+  elements.reviewClose?.addEventListener("click", closeReviewPanel);
+  elements.reviewGrantButton?.addEventListener("click", () => {
+    void startReviewGeneration();
+  });
+  elements.reviewCancelGeneration?.addEventListener("click", () => {
+    reviewAbortController?.abort();
+  });
+  elements.lseGenerateButton?.addEventListener("click", () => {
+    void generateLse();
+  });
+  elements.strongSaveConfig?.addEventListener("click", async () => {
+    const baseUrl = elements.strongBaseUrlInput.value.trim();
+    const model = elements.strongModelInput.value.trim();
+    if (!baseUrl || !model) {
+      elements.strongAiStatus.textContent = "服务地址和模型不能为空。";
+      return;
+    }
+    localState = writeLocalState({
+      ...localState,
+      preferences: { ...localState.preferences, strongBaseUrl: baseUrl, strongModel: model },
+    });
+    const apiKey = elements.strongApiKeyInput.value.trim();
+    const bridge = window.nightStudyCredential;
+    if (apiKey && bridge?.save) {
+      const saved = await bridge.save("echo-strong", apiKey);
+      if (saved?.ok) {
+        strongApiKey = apiKey;
+        elements.strongApiKeyInput.value = "";
+      } else {
+        elements.strongAiStatus.textContent = "密钥保存到系统安全存储失败，请重试。";
+      }
+    }
+    rebuildStrongClients();
+    updateStrongUi();
+  });
+  elements.strongClearKey?.addEventListener("click", async () => {
+    const bridge = window.nightStudyCredential;
+    if (bridge?.remove) await bridge.remove("echo-strong");
+    strongApiKey = null;
+    rebuildStrongClients();
+    updateStrongUi();
+  });
+  elements.zoteroSaveCredentials?.addEventListener("click", async () => {
+    const bridge = window.nightStudyCredential;
+    if (!bridge?.save) return;
+    const apiKey = elements.zoteroApiKeyInput.value.trim();
+    const libraryId = elements.zoteroLibraryIdInput.value.trim();
+    if (apiKey && (await bridge.save("zotero-api-key", apiKey)).ok) {
+      elements.zoteroApiKeyInput.value = "";
+    }
+    if (libraryId && (await bridge.save("zotero-library-id", libraryId)).ok) {
+      elements.zoteroLibraryIdInput.value = "";
+    }
+    elements.zoteroStatus.textContent = "凭据已保存到系统安全存储。";
+  });
+  elements.zoteroRefreshStatus?.addEventListener("click", () => {
+    void refreshZoteroStatus();
+  });
+  elements.zoteroPushButton?.addEventListener("click", () => {
+    void pushCurrentBookToZotero();
+  });
+}
+
+bindReviewControls();
 
 function emptyRenderSnapshot() {
   const budget = cacheBudgetForDeviceMemory(deviceMemoryGb, {

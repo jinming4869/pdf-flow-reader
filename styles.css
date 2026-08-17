@@ -2867,3 +2867,69 @@ body.is-dragging::after {
 .book-trace-echo button[hidden] {
   display: none;
 }
+
+.review-panel {
+  width: min(640px, calc(100vw - 48px));
+}
+
+.review-sections {
+  max-height: 300px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.review-section-entry {
+  padding: 10px 12px;
+  border: 1px solid rgba(82, 117, 98, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 252, 0.6);
+}
+
+.review-section-entry strong {
+  display: block;
+  margin-bottom: 4px;
+  color: rgba(82, 117, 98, 0.75);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.review-section-entry p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.lse-result {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lse-field {
+  padding: 10px 12px;
+  border: 1px solid rgba(82, 117, 98, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 252, 0.6);
+}
+
+.lse-field strong {
+  display: block;
+  margin-bottom: 4px;
+  color: rgba(82, 117, 98, 0.75);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.lse-field p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.lse-result[hidden] {
+  display: none;
+}

@@ -214,6 +214,7 @@
           <h2 id="bookTraceTitle">一本书的航迹</h2>
         </div>
         <div class="book-trace-header-actions">
+          <button id="bookTraceReview" type="button">回望</button>
           <button id="bookTraceEchoArchive" type="button">回声／归档</button>
           <button id="bookTraceTrashView" type="button" aria-pressed="false">回收站</button>
           <button id="bookTraceClose" type="button" aria-label="关闭单书航迹">×</button>
@@ -267,6 +268,34 @@
       <button id="ttsDiagnosticsSelfTest" type="button">本地语音自检</button>
     </aside>
 
+    <aside id="reviewPanel" class="echo-archive-panel review-panel" role="dialog" aria-modal="true" aria-label="单书回望" hidden>
+      <div class="echo-archive-heading">
+        <strong>单书回望</strong>
+        <button id="reviewClose" type="button" aria-label="关闭单书回望">×</button>
+      </div>
+      <section class="echo-archive-section" id="reviewConsentSection">
+        <h3>发送前确认</h3>
+        <p id="reviewConsentSummary" class="echo-ai-status" role="status">正在统计发送内容…</p>
+        <div class="echo-archive-actions">
+          <button id="reviewGrantButton" type="button">确认发送并生成回望</button>
+          <button id="reviewCancelGeneration" type="button" hidden>取消生成</button>
+        </div>
+      </section>
+      <section class="echo-archive-section" id="reviewProgressSection" hidden>
+        <h3>生成进度</h3>
+        <p id="reviewProgressText" class="echo-ai-status" role="status">未开始。</p>
+      </section>
+      <section class="echo-archive-section" id="reviewResultSection" hidden>
+        <h3>回望结果</h3>
+        <p id="reviewResultMeta" class="echo-ai-status" role="status"></p>
+        <div id="reviewSections" class="review-sections"></div>
+        <div class="echo-archive-actions">
+          <button id="lseGenerateButton" type="button">生成 LSE 工作纸</button>
+        </div>
+        <div id="lseResult" class="lse-result" hidden></div>
+      </section>
+    </aside>
+
     <aside id="echoArchivePanel" class="echo-archive-panel" role="dialog" aria-modal="true" aria-label="回声与归档" hidden>
       <div class="echo-archive-heading">
         <strong>回声与归档</strong>
@@ -292,6 +321,39 @@
           <button id="echoClearKey" type="button">清除密钥</button>
         </div>
         <p class="echo-note">未配置时离线核心完整可用；配置后套索保存会异步生成一句复述，不阻塞阅读。</p>
+      </section>
+      <section class="echo-archive-section">
+        <h3>回望与 LSE 配置（强分析）</h3>
+        <p id="strongAiStatus" class="echo-ai-status" role="status">正在检查凭据状态…</p>
+        <label class="echo-field">服务地址
+          <input id="strongBaseUrlInput" type="text" placeholder="https://api.deepseek.com" autocomplete="off">
+        </label>
+        <label class="echo-field">模型
+          <input id="strongModelInput" type="text" placeholder="deepseek-chat" autocomplete="off">
+        </label>
+        <label class="echo-field">API 密钥（保存到系统安全存储）
+          <input id="strongApiKeyInput" type="password" placeholder="sk-…" autocomplete="off">
+        </label>
+        <div class="echo-archive-actions">
+          <button id="strongSaveConfig" type="button">保存配置</button>
+          <button id="strongClearKey" type="button">清除密钥</button>
+        </div>
+      </section>
+      <section class="echo-archive-section">
+        <h3>Zotero</h3>
+        <p id="zoteroStatus" class="echo-ai-status" role="status">未检测。</p>
+        <label class="echo-field">zotero.org API key
+          <input id="zoteroApiKeyInput" type="password" placeholder="在 zotero.org/settings/keys 创建" autocomplete="off">
+        </label>
+        <label class="echo-field">Library ID
+          <input id="zoteroLibraryIdInput" type="text" placeholder="用户库 ID（数字）" autocomplete="off">
+        </label>
+        <div class="echo-archive-actions">
+          <button id="zoteroSaveCredentials" type="button">保存凭据</button>
+          <button id="zoteroRefreshStatus" type="button">刷新状态</button>
+          <button id="zoteroPushButton" type="button">导入当前书到 Zotero</button>
+        </div>
+        <p class="echo-note">本地匹配优先附件文件名；未匹配时创建条目并上传 PDF。裁图不上传。</p>
       </section>
       <section class="echo-archive-section">
         <h3>归档</h3>

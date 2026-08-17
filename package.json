@@ -30,6 +30,14 @@
     "appId": "com.jinming4869.pdf-flow-reader",
     "productName": "夜晚的书斋",
     "asar": false,
+    "fileAssociations": [
+      {
+        "ext": "pdf",
+        "name": "PDF Document",
+        "role": "Viewer",
+        "mimeType": "application/pdf"
+      }
+    ],
     "files": [
       "electron-main.mjs",
       "electron-preload.cjs",
@@ -38,6 +46,11 @@
       "archive-export.mjs",
       "archive-repository.mjs",
       "archive-ipc.mjs",
+      "zotero-local-client.mjs",
+      "zotero-web-client.mjs",
+      "zotero-bridge.mjs",
+      "zotero-ipc.mjs",
+      "send-consent.mjs",
       "echo-client.mjs",
       "echo-state.mjs",
       "prompt-templates.mjs",

@@ -21,6 +21,10 @@ const channels = Object.freeze({
   archiveEnqueue: "night-study:archive-enqueue",
   archiveRetryFailed: "night-study:archive-retry-failed",
   archiveChooseDirectory: "night-study:archive-choose-directory",
+  zoteroProbe: "night-study:zotero-probe",
+  zoteroMatch: "night-study:zotero-match",
+  zoteroVerify: "night-study:zotero-verify",
+  zoteroPush: "night-study:zotero-push",
 });
 
 function invoke(channel, payload) {
@@ -117,5 +121,20 @@ contextBridge.exposeInMainWorld("nightStudyArchive", Object.freeze({
   },
   chooseDirectory() {
     return invoke(channels.archiveChooseDirectory);
+  },
+}));
+
+contextBridge.exposeInMainWorld("nightStudyZotero", Object.freeze({
+  probe() {
+    return invoke(channels.zoteroProbe);
+  },
+  matchBook(input) {
+    return invoke(channels.zoteroMatch, input);
+  },
+  verifyCredentials() {
+    return invoke(channels.zoteroVerify);
+  },
+  pushBook(input) {
+    return invoke(channels.zoteroPush, input);
   },
 }));

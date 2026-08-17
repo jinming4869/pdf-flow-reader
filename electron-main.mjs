@@ -10,6 +10,8 @@ import { createCredentialStore } from "./credential-store.mjs";
 import { registerCredentialIpc } from "./credential-ipc.mjs";
 import { createArchiveRepository } from "./archive-repository.mjs";
 import { registerArchiveIpc } from "./archive-ipc.mjs";
+import { createZoteroBridge } from "./zotero-bridge.mjs";
+import { registerZoteroIpc } from "./zotero-ipc.mjs";
 
 const appRoot = dirname(fileURLToPath(import.meta.url));
 const applicationName = "夜晚的书斋";
@@ -35,6 +37,8 @@ let credentialStore = null;
 let disposeCredentialIpc = null;
 let archiveRepository = null;
 let disposeArchiveIpc = null;
+let zoteroBridge = null;
+let disposeZoteroIpc = null;
 let pendingPdfPath = findPdfArgument(process.argv.slice(1));
 
 process.on("unhandledRejection", (reason) => {
@@ -228,6 +232,20 @@ async function runCredentialSelfCheck() {
   } catch (error) {
     console.error(`CREDENTIAL_SELF_CHECK_FAILED ${error?.message ?? error}`);
     setTimeout(() => app.exit(1), 0);
+    return false;
+  }
+}
+
+async function initializeZoteroInfrastructure() {
+  try {
+    zoteroBridge = createZoteroBridge({ credentialStore });
+    disposeZoteroIpc = registerZoteroIpc({ ipcMain, bridge: zoteroBridge });
+    return true;
+  } catch (error) {
+    zoteroBridge = null;
+    disposeZoteroIpc?.();
+    disposeZoteroIpc = null;
+    console.error("Zotero 桥接暂不可用：", error);
     return false;
   }
 }
@@ -463,6 +481,8 @@ app.whenReady().then(async () => {
   writeBootProbe("credential", credentialStore?.status() ?? null);
   await initializeArchiveInfrastructure();
   writeBootProbe("archive");
+  await initializeZoteroInfrastructure();
+  writeBootProbe("zotero");
   if (process.env.NIGHT_STUDY_ARCHIVE_SMOKE === "1") {
     await runArchiveSelfCheck();
     return;
@@ -494,6 +514,9 @@ app.on("before-quit", () => {
   disposeArchiveIpc?.();
   disposeArchiveIpc = null;
   archiveRepository = null;
+  disposeZoteroIpc?.();
+  disposeZoteroIpc = null;
+  zoteroBridge = null;
   if (iconTimer) {
     clearInterval(iconTimer);
     iconTimer = null;

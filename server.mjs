@@ -60,6 +60,7 @@ function createStaticFiles(appRoot) {
     ["/echo-client.mjs", [join(appRoot, "echo-client.mjs"), "text/javascript; charset=utf-8"]],
     ["/echo-state.mjs", [join(appRoot, "echo-state.mjs"), "text/javascript; charset=utf-8"]],
     ["/prompt-templates.mjs", [join(appRoot, "prompt-templates.mjs"), "text/javascript; charset=utf-8"]],
+    ["/send-consent.mjs", [join(appRoot, "send-consent.mjs"), "text/javascript; charset=utf-8"]],
     ["/build/rhythm-motifs/snow-mist.svg", [join(appRoot, "build", "rhythm-motifs", "snow-mist.svg"), "image/svg+xml"]],
     ["/build/rhythm-motifs/aesthetic-walk.svg", [join(appRoot, "build", "rhythm-motifs", "aesthetic-walk.svg"), "image/svg+xml"]],
     ["/build/rhythm-motifs/long-day.svg", [join(appRoot, "build", "rhythm-motifs", "long-day.svg"), "image/svg+xml"]],

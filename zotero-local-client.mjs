@@ -74,11 +74,38 @@ export function createZoteroLocalClient({
   const origin = safeBaseUrl(baseUrl);
 
   async function probe() {
-    const version = await requestJson(fetchFn, `${origin}/api/`, { timeoutMs });
-    return {
-      available: true,
-      message: typeof version?.message === "string" ? version.message : null,
-    };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetchFn(`${origin}/api/`, { signal: controller.signal });
+      if (!response.ok) {
+        throw new ZoteroLocalError(
+          `Zotero 本地服务返回 ${response.status}。`,
+          response.status === 404 ? "ZOTERO_LOCAL_NOT_FOUND" : "ZOTERO_LOCAL_ERROR",
+        );
+      }
+      // /api/ 根路径可能返回纯文本版本信息，不要求 JSON。
+      const raw = await response.text();
+      let message = null;
+      try {
+        const parsed = raw ? JSON.parse(raw) : null;
+        message = typeof parsed?.message === "string" ? parsed.message : null;
+      } catch {
+        message = raw?.trim()?.slice(0, 120) || null;
+      }
+      return { available: true, message };
+    } catch (error) {
+      if (error instanceof ZoteroLocalError) throw error;
+      if (error?.name === "AbortError") {
+        throw new ZoteroLocalError("Zotero 本地服务响应超时。", "ZOTERO_LOCAL_TIMEOUT");
+      }
+      throw new ZoteroLocalError(
+        `无法连接 Zotero 本地服务：${error?.message ?? error}`,
+        "ZOTERO_LOCAL_UNREACHABLE",
+      );
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async function listTopItems({ limit = 100, q = null } = {}) {

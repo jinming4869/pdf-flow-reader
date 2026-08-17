@@ -70,3 +70,18 @@
 - 修复两处打包/服务缺陷：server 静态模块白名单补齐三个新 renderer 模块；echo-client 改用浏览器安全 base64（原 Buffer 在 renderer 不存在）。
 
 S4 完成，v5.1 功能面闭环；进入 S5 打包与全量验收。
+
+## 2026-08-16：S5 打包与自动化验收复核
+
+结论：5.1.0-beta.1 macOS arm64 候选打包完成；源码回归、四套 Electron smoke、packaged 未签名与 ad-hoc 签名两种状态的自检全部通过；等待产品所有者真实 PDF 验收。
+
+关键证据：
+
+- Node 回归 423 / 423；
+- Electron smoke 四套：integration（exit 0）、credential（passed）、archive（passed）、echo-ui（passed）；
+- packaged 未签名：凭据自检、归档自检（写入 + 幂等跳过 + md/png 落盘）、中/日/英三语言 TTS 与硬取消全部通过；
+- packaged ad-hoc 深签名 + strict verify 后：凭据与归档自检 exit 0；
+- 候选：`night-study-5.1.0-beta.1-mac-arm64.zip`，SHA-256 `cce613ed415c35b6dab5871f9f7c4a07e4f652a26c706ec6ecb9d18b784bca13`；
+- 打包白名单补齐 `prompt-templates.mjs`（electron-builder files 与 server 静态模块表均已同步）。
+
+S5 剩余：产品所有者用真实 PDF 验收（凭据配置、一句复述、归档导出、未配置降级）。
